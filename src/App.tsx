@@ -67,10 +67,10 @@ interface Chapter {
 }
 
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
-  { label: 'Dạng I (1 lựa chọn)', biet: 8, hieu: 4, vandung: 0, vandungcao: 0 },
-  { label: 'Dạng II (Đúng/Sai)', biet: 1, hieu: 1, vandung: 0, vandungcao: 0 },
-  { label: 'Dạng III (Trả lời ngắn)', biet: 1, hieu: 1, vandung: 2, vandungcao: 0 },
-  { label: 'Tự luận', biet: 0, hieu: 1, vandung: 2, vandungcao: 0 },
+  { label: 'Dạng I (1 lựa chọn)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
+  { label: 'Dạng II (Đúng/Sai)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
+  { label: 'Dạng III (Trả lời ngắn)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
+  { label: 'Tự luận', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
 ];
 
 // ─── App ────────────────────────────────────────────────────────────
@@ -710,19 +710,19 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               <div className="flex-1 grid grid-cols-4 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Biết</label>
-                  <input type="number" value={row.biet} onChange={(e) => updateStructure(idx, 'biet', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
+                  <input type="number" value={row.biet} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Hiểu</label>
-                  <input type="number" value={row.hieu} onChange={(e) => updateStructure(idx, 'hieu', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
+                  <input type="number" value={row.hieu} onChange={(e) => updateStructure(idx, 'hieu', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
-                  <input type="number" value={row.vandung} onChange={(e) => updateStructure(idx, 'vandung', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
+                  <input type="number" value={row.vandung} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">VD cao</label>
-                  <input type="number" value={row.vandungcao} onChange={(e) => updateStructure(idx, 'vandungcao', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
+                  <input type="number" value={row.vandungcao} onChange={(e) => updateStructure(idx, 'vandungcao', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
               </div>
             </div>
