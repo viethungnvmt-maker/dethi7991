@@ -51,6 +51,7 @@ export async function callGeminiWithFile(
       config: {
         temperature: 0.3,
         maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
       }
     });
 
