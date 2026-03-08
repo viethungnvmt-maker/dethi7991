@@ -63,6 +63,7 @@ export default function App() {
   const [loaiKiemTra, setLoaiKiemTra] = useState('Giữa kỳ 1');
   const [thoiGian, setThoiGian] = useState(45);
   const [examStructure, setExamStructure] = useState<ExamStructureRow[]>(DEFAULT_EXAM_STRUCTURE);
+  const [ppctFile, setPpctFile] = useState<File | null>(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -211,10 +212,32 @@ export default function App() {
 
         {/* Upload PPCT */}
         <div className="mt-6">
-          <button className="upload-btn">
-            <Upload size={18} />
-            Upload File PPCT (.pdf, .docx)
-          </button>
+          <input
+            type="file"
+            id="ppct-upload"
+            accept=".pdf,.docx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) setPpctFile(file);
+            }}
+          />
+          {ppctFile ? (
+            <div className="flex items-center justify-between px-4 py-3 border border-primary/30 rounded-xl bg-primary/5">
+              <span className="text-sm text-primary truncate">{ppctFile.name}</span>
+              <button
+                onClick={() => { setPpctFile(null); (document.getElementById('ppct-upload') as HTMLInputElement).value = ''; }}
+                className="text-xs text-slate-400 hover:text-red-400 ml-3 shrink-0"
+              >
+                Xóa
+              </button>
+            </div>
+          ) : (
+            <label htmlFor="ppct-upload" className="upload-btn cursor-pointer">
+              <Upload size={18} />
+              Upload File PPCT (.pdf, .docx)
+            </label>
+          )}
         </div>
       </div>
 
