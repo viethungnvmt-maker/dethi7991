@@ -360,8 +360,28 @@ th { font-weight: bold; }
     URL.revokeObjectURL(url);
   };
 
-  const downloadDoc = (html: string, filename: string) => {
-    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid black;padding:5px;vertical-align:middle;}th{font-weight:bold;}</style></head><body>${html}</body></html>`;
+  const downloadDoc = (html: string, filename: string, landscape: boolean = false) => {
+    // A4: width=11906 twips (210mm), height=16838 twips (297mm)
+    // Landscape: swap w/h and add orient
+    const pgW = landscape ? 16838 : 11906;
+    const pgH = landscape ? 11906 : 16838;
+    const wordSetup = `
+      <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom>
+        <w:Body><w:SectPr>
+          <w:pgSz w:w="${pgW}" w:h="${pgH}" ${landscape ? 'w:orient="landscape"' : ''}/>
+          <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="720" w:footer="720"/>
+        </w:SectPr></w:Body>
+      </w:WordDocument></xml>
+      <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>
+        <w:Body><w:SectPr>
+          <w:pgSz w:w="${pgW}" w:h="${pgH}" ${landscape ? 'w:orient="landscape"' : ''}/>
+          <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="720" w:footer="720"/>
+        </w:SectPr></w:Body>
+      </w:WordDocument></xml><![endif]-->`;
+    const pageStyle = landscape
+      ? `@page { size: A4 landscape; margin: 2cm; } @page Section1 { size: 29.7cm 21cm; mso-page-orientation: landscape; margin: 2cm; }`
+      : `@page { size: A4; margin: 2cm; } @page Section1 { size: 21cm 29.7cm; margin: 2cm; }`;
+    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'>${wordSetup}<style>${pageStyle} body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid black;padding:5px;vertical-align:middle;}th{font-weight:bold;}</style></head><body>${html}</body></html>`;
     const blob = new Blob(['\uFEFF', htmlWithMeta], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -451,7 +471,12 @@ YÊU CẦU OUTPUT:
 5. Trường: "TRƯỜNG THPT ..............." (để trống)
 6. Có phần Họ tên, SBD
 7. Nội dung câu hỏi phải phù hợp với bảng đặc tả
-8. Đáp án rõ ràng ở cuối
+8. Đáp án ở cuối PHẢI trình bày dạng BẢNG, mỗi bảng 10 câu, gồm 2 dòng:
+   - Dòng 1: "Câu" | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+   - Dòng 2: "Đáp án" | A | B | C | D | ... (đáp án tương ứng)
+   - Bảng tiếp theo: Câu 11-20, 21-30, 31-40... cho đến hết
+   - Mỗi bảng cách nhau 1 dòng trống
+   - Style bảng: border 1px solid black, padding 5px, text-align center
 
 Format câu hỏi:
 - Trắc nghiệm: Câu X. Nội dung -> A. B. C. D.
@@ -762,7 +787,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
               <Upload size={13} /> Upload Ma trận
             </button>
-            <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+            <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
             </button>
             <button onClick={() => downloadHtml(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
@@ -841,7 +866,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             <h2 className="text-lg font-semibold text-primary">Bảng đặc tả</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+            <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
             </button>
             <button onClick={() => downloadHtml(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
