@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
-import { callGeminiAI, callGeminiWithFile, PROMPTS } from './services/gemini';
+import { callGeminiAI, parsePPCTFile } from './services/gemini';
 
 // ─── Constants ──────────────────────────────────────────────────────
 const STEPS = [
@@ -51,17 +51,19 @@ interface ExamStructureRow {
   vandungcao: number;
 }
 
-interface PPCTLesson {
+interface Lesson {
+  id: string;
   name: string;
   periods: number;
-  week: string;
-  selected: boolean;
+  weekStart?: number;
+  weekEnd?: number;
 }
 
-interface PPCTSemester {
+interface Chapter {
+  id: string;
   name: string;
-  lessons: PPCTLesson[];
-  collapsed: boolean;
+  totalPeriods: number;
+  lessons: Lesson[];
 }
 
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
@@ -93,9 +95,10 @@ export default function App() {
   const [thoiGian, setThoiGian] = useState(45);
   const [examStructure, setExamStructure] = useState<ExamStructureRow[]>(DEFAULT_EXAM_STRUCTURE);
   const [ppctFile, setPpctFile] = useState<File | null>(null);
-  const [ppctData, setPpctData] = useState<PPCTSemester[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [selectedLessons, setSelectedLessons] = useState<Set<string>>(new Set());
+  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [isParsing, setIsParsing] = useState(false);
-  const [filterBySemester, setFilterBySemester] = useState(false);
   const [matrixHtml, setMatrixHtml] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -142,64 +145,19 @@ export default function App() {
     setIsParsing(true);
     try {
       const base64 = await fileToBase64(file);
-      const mimeType = file.name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const data = await parsePPCTFile(file, base64, monHoc, khoiLop, apiKey, model);
 
-      const result = await callGeminiWithFile(
-        PROMPTS.PARSE_PPCT(),
-        base64,
-        mimeType,
-        apiKey,
-        model
-      );
+      console.log('đăng parse PPCT data:', data);
 
-      // Parse JSON from response - with robust error recovery
-      const cleanResult = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      const tryParseJSON = (text: string) => {
-        // Try direct parse first
-        try { return JSON.parse(text); } catch { }
-
-        // Fix common AI JSON issues
-        let fixed = text
-          .replace(/,\s*([}\]])/g, '$1')        // trailing commas
-          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
-          .replace(/:\s*'([^']*)'/g, ': "$1"')   // single quotes to double
-          .replace(/\n/g, ' ')                    // newlines in strings
-          .replace(/\t/g, ' ');                   // tabs
-        try { return JSON.parse(fixed); } catch { }
-
-        // Try extracting just the JSON object
-        const match = fixed.match(/\{[\s\S]*\}/);
-        if (match) {
-          try { return JSON.parse(match[0]); } catch { }
-          // Last resort: truncate at last valid closing
-          const lastBrace = match[0].lastIndexOf('}');
-          const lastBracket = match[0].lastIndexOf(']');
-          const truncated = match[0].substring(0, Math.max(lastBrace, lastBracket) + 1);
-          // Ensure balanced braces
-          const openBraces = (truncated.match(/\{/g) || []).length;
-          const closeBraces = (truncated.match(/\}/g) || []).length;
-          const balanced = truncated + '}'.repeat(Math.max(0, openBraces - closeBraces));
-          try { return JSON.parse(balanced); } catch { }
-        }
-        return null;
-      };
-
-      const data = tryParseJSON(cleanResult);
-      if (data && data.semesters) {
-        const semesters: PPCTSemester[] = data.semesters.map((s: any) => ({
-          name: s.name,
-          collapsed: false,
-          lessons: (s.lessons || []).map((l: any) => ({
-            name: l.name || 'Không rõ tên',
-            periods: l.periods || 1,
-            week: l.week || '',
-            selected: false,
-          })),
-        }));
-        setPpctData(semesters);
+      if (data.chapters && data.chapters.length > 0) {
+        setChapters(data.chapters);
+        // Auto-expand and select all
+        const allChapterIds = new Set(data.chapters.map((c: Chapter) => c.id));
+        setExpandedChapters(allChapterIds);
+        // Auto-select based on exam type
+        autoSelectByExamType(loaiKiemTra, data.chapters);
       } else {
-        throw new Error('AI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.');
+        throw new Error('Không tìm thấy dữ liệu bài học trong file');
       }
     } catch (error: any) {
       console.error('Parse PPCT error:', error);
@@ -208,7 +166,7 @@ export default function App() {
       Swal.fire({
         title: isQuota ? 'Hết quota API' : 'Lỗi phân tích',
         html: isQuota
-          ? 'API Key đã hết lượt gọi miễn phí.<br><br>💡 <b>Giải pháp:</b><br>• Đợi vài phút rồi thử lại<br>• Đổi sang model khác trong "Cài đặt API Key"<br>• Hoặc nâng cấp API Key lên gói trả phí'
+          ? 'API Key đã hết lượt gọi miễn phí.<br><br>💡 <b>Giải pháp:</b><br>• Đợi vài phút rồi thử lại<br>• Hoặc nâng cấp API Key lên gói trả phí'
           : (errMsg.length > 200 ? errMsg.substring(0, 200) + '...' : errMsg) || 'Không thể phân tích file PPCT',
         icon: isQuota ? 'warning' : 'error',
         confirmButtonColor: '#2dd4a8',
@@ -220,21 +178,47 @@ export default function App() {
     }
   };
 
-  const toggleLesson = (semIdx: number, lesIdx: number) => {
-    setPpctData(prev => prev.map((sem, si) =>
-      si === semIdx ? {
-        ...sem,
-        lessons: sem.lessons.map((les, li) =>
-          li === lesIdx ? { ...les, selected: !les.selected } : les
-        )
-      } : sem
-    ));
+  const autoSelectByExamType = (examType: string, chapterList: Chapter[]) => {
+    const selected = new Set<string>();
+    chapterList.forEach(ch => {
+      ch.lessons.forEach(les => {
+        const wEnd = les.weekEnd || 99;
+        const wStart = les.weekStart || 0;
+        let match = false;
+        if (examType.includes('Giữa kỳ 1')) match = wEnd <= 10;
+        else if (examType.includes('Cuối kỳ 1')) match = wEnd <= 18;
+        else if (examType.includes('Giữa kỳ 2')) match = wStart >= 19 && wEnd <= 27;
+        else match = true; // Cuối kỳ 2 or default = all
+        if (match) selected.add(les.id);
+      });
+    });
+    setSelectedLessons(selected);
   };
 
-  const toggleSemesterCollapse = (semIdx: number) => {
-    setPpctData(prev => prev.map((sem, si) =>
-      si === semIdx ? { ...sem, collapsed: !sem.collapsed } : sem
-    ));
+  const toggleLesson = (lessonId: string) => {
+    setSelectedLessons(prev => {
+      const next = new Set(prev);
+      next.has(lessonId) ? next.delete(lessonId) : next.add(lessonId);
+      return next;
+    });
+  };
+
+  const toggleChapter = (chapterId: string, checked: boolean) => {
+    const chapter = chapters.find(c => c.id === chapterId);
+    if (!chapter) return;
+    setSelectedLessons(prev => {
+      const next = new Set(prev);
+      chapter.lessons.forEach(l => checked ? next.add(l.id) : next.delete(l.id));
+      return next;
+    });
+  };
+
+  const toggleChapterExpand = (chapterId: string) => {
+    setExpandedChapters(prev => {
+      const next = new Set(prev);
+      next.has(chapterId) ? next.delete(chapterId) : next.add(chapterId);
+      return next;
+    });
   };
 
   const handleGenerateMatrix = async () => {
@@ -264,24 +248,36 @@ export default function App() {
     setIsGenerating(true);
     try {
       // Build selected topics summary
-      const selectedLessons = ppctData.flatMap(sem =>
-        sem.lessons.filter(l => l.selected).map(l => `${l.name} (${l.periods} tiết)`)
-      );
-      const ppctSummary = selectedLessons.length > 0
-        ? selectedLessons.join('\n')
+      const selectedTopics: any[] = [];
+      chapters.forEach(ch => {
+        const selLessons = ch.lessons.filter(l => selectedLessons.has(l.id));
+        if (selLessons.length > 0) {
+          selectedTopics.push({
+            name: ch.name,
+            lessons: selLessons.map(l => ({ name: l.name, periods: l.periods }))
+          });
+        }
+      });
+      const ppctSummary = selectedTopics.length > 0
+        ? selectedTopics.map(t => `${t.name}: ${t.lessons.map((l: any) => `${l.name} (${l.periods} tiết)`).join(', ')}`).join('\n')
         : `Khối ${khoiLop || '10'} - Chưa có danh sách bài cụ thể`;
 
       const structureSummary = examStructure
         .map(r => `${r.label}: Biết=${r.biet}, Hiểu=${r.hieu}, VD=${r.vandung}, VDcao=${r.vandungcao}`)
         .join('\n');
 
-      const prompt = PROMPTS.GENERATE_MATRIX(
-        monHoc,
-        ppctSummary,
-        loaiKiemTra,
-        thoiGian,
-        structureSummary
-      );
+      const prompt = `Hãy tạo MA TRẬN ĐỀ KIỂM TRA cho môn ${monHoc}.
+Loại kiểm tra: ${loaiKiemTra}, Thời gian: ${thoiGian} phút.
+
+PPCT (các bài đã chọn):
+${ppctSummary}
+
+Cấu trúc đề thi:
+${structureSummary}
+
+Trả về Full HTML Document chứa bảng ma trận đề kiểm tra theo CV 7991.
+Style CSS inline: font Times New Roman, border collapse, padding 4px 6px.
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const result = await callGeminiAI(prompt, apiKey, model);
 
       // Clean markdown code blocks if any
@@ -422,7 +418,8 @@ export default function App() {
               const file = e.target.files?.[0];
               if (file) {
                 setPpctFile(file);
-                setPpctData([]);
+                setChapters([]);
+                setSelectedLessons(new Set());
                 handleParsePPCT(file);
               }
             }}
@@ -441,7 +438,8 @@ export default function App() {
               <button
                 onClick={() => {
                   setPpctFile(null);
-                  setPpctData([]);
+                  setChapters([]);
+                  setSelectedLessons(new Set());
                   (document.getElementById('ppct-upload') as HTMLInputElement).value = '';
                 }}
                 className="text-xs text-slate-400 hover:text-red-400 ml-3 shrink-0"
@@ -459,7 +457,7 @@ export default function App() {
       </div>
 
       {/* Card 2: Chọn chủ đề trọng tâm (after PPCT parsed) */}
-      {ppctData.length > 0 && (
+      {chapters.length > 0 && (
         <div className="glass-card p-6 md:p-8">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
@@ -467,64 +465,67 @@ export default function App() {
               <h2 className="text-lg font-semibold text-primary">Chọn chủ đề trọng tâm</h2>
             </div>
             <button
-              onClick={() => setFilterBySemester(!filterBySemester)}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${filterBySemester
-                ? 'border-primary/40 text-primary bg-primary/10'
-                : 'border-border text-slate-400 hover:text-primary'
-                }`}
+              onClick={() => autoSelectByExamType(loaiKiemTra, chapters)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-slate-400 hover:text-primary transition-colors"
             >
               <Filter size={12} />
               Lọc theo kỳ
             </button>
           </div>
 
-          <div className="space-y-2">
-            {ppctData.map((sem, semIdx) => {
-              const totalPeriods = sem.lessons.reduce((sum, l) => sum + l.periods, 0);
+          <div className="space-y-1 rounded-xl overflow-hidden border border-border">
+            {chapters.map((chapter) => {
+              const isExpanded = expandedChapters.has(chapter.id);
+              const selectedCount = chapter.lessons.filter(l => selectedLessons.has(l.id)).length;
+              const allSelected = selectedCount === chapter.lessons.length;
+              const someSelected = selectedCount > 0 && !allSelected;
               return (
-                <div key={semIdx}>
-                  {/* Semester header */}
-                  <button
-                    onClick={() => toggleSemesterCollapse(semIdx)}
-                    className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-light transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      {sem.collapsed ? <ChevronRight size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
-                      <span className="text-sm font-semibold text-slate-300">{sem.name}</span>
-                    </div>
-                    <span className="text-xs px-2 py-0.5 rounded bg-surface-light text-primary border border-border">
-                      {totalPeriods} tiết
+                <div key={chapter.id} className="border-b border-border last:border-0">
+                  {/* Chapter header */}
+                  <div className="flex items-center py-2.5 px-3 bg-surface-light/40 hover:bg-surface-light transition-colors">
+                    <button onClick={() => toggleChapterExpand(chapter.id)} className="p-1 mr-2 text-slate-400">
+                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 mr-3 accent-primary"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={(e) => toggleChapter(chapter.id, e.target.checked)}
+                    />
+                    <div className="flex-1 text-sm font-semibold text-slate-200">{chapter.name}</div>
+                    <span className="text-xs px-2 py-0.5 rounded bg-surface-light text-primary border border-border ml-2">
+                      {chapter.totalPeriods} tiết
                     </span>
-                  </button>
+                  </div>
 
                   {/* Lessons list */}
-                  {!sem.collapsed && (
-                    <div className="ml-4 border-l border-border pl-3 space-y-0.5">
-                      {sem.lessons.map((lesson, lesIdx) => (
+                  {isExpanded && (
+                    <div className="pl-12 pr-4 py-2 space-y-0.5 bg-bg">
+                      {chapter.lessons.map((lesson) => (
                         <div
-                          key={lesIdx}
-                          onClick={() => toggleLesson(semIdx, lesIdx)}
-                          className={`flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-colors ${lesson.selected
+                          key={lesson.id}
+                          onClick={() => toggleLesson(lesson.id)}
+                          className={`flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-colors ${selectedLessons.has(lesson.id)
                             ? 'bg-primary/10'
                             : 'hover:bg-surface-light'
                             }`}
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${lesson.selected
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${selectedLessons.has(lesson.id)
                               ? 'bg-primary border-primary'
                               : 'border-border'
                               }`}>
-                              {lesson.selected && <Check size={10} className="text-bg" />}
+                              {selectedLessons.has(lesson.id) && <Check size={10} className="text-bg" />}
                             </div>
-                            <span className={`text-sm truncate ${lesson.selected ? 'text-slate-200' : 'text-slate-400'
-                              }`}>
+                            <span className={`text-sm truncate ${selectedLessons.has(lesson.id) ? 'text-slate-200' : 'text-slate-400'}`}>
                               {lesson.name}
                             </span>
                           </div>
-                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
                             <span className="text-xs text-primary">{lesson.periods} tiết</span>
-                            {lesson.week && (
-                              <span className="text-xs text-slate-500">{lesson.week}</span>
+                            {lesson.weekEnd && (
+                              <span className="text-xs text-slate-500">Tuần {lesson.weekStart}-{lesson.weekEnd}</span>
                             )}
                           </div>
                         </div>
@@ -534,6 +535,10 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+
+          <div className="mt-4 flex items-center text-sm text-primary px-3 py-2 rounded-lg bg-surface-light border border-border">
+            Đã chọn: <strong className="ml-1">{selectedLessons.size}</strong>&nbsp;bài học
           </div>
         </div>
       )}
@@ -548,52 +553,25 @@ export default function App() {
         <div className="space-y-5">
           {examStructure.map((row, idx) => (
             <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-              {/* Row label */}
               <div className="sm:w-52 shrink-0">
                 <span className="text-sm font-medium text-primary">{row.label}</span>
               </div>
-
-              {/* Inputs */}
               <div className="flex-1 grid grid-cols-4 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Biết</label>
-                  <input
-                    type="number"
-                    value={row.biet}
-                    onChange={(e) => updateStructure(idx, 'biet', parseInt(e.target.value) || 0)}
-                    className="input-field text-center"
-                    min={0}
-                  />
+                  <input type="number" value={row.biet} onChange={(e) => updateStructure(idx, 'biet', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Hiểu</label>
-                  <input
-                    type="number"
-                    value={row.hieu}
-                    onChange={(e) => updateStructure(idx, 'hieu', parseInt(e.target.value) || 0)}
-                    className="input-field text-center"
-                    min={0}
-                  />
+                  <input type="number" value={row.hieu} onChange={(e) => updateStructure(idx, 'hieu', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
-                  <input
-                    type="number"
-                    value={row.vandung}
-                    onChange={(e) => updateStructure(idx, 'vandung', parseInt(e.target.value) || 0)}
-                    className="input-field text-center"
-                    min={0}
-                  />
+                  <input type="number" value={row.vandung} onChange={(e) => updateStructure(idx, 'vandung', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">VD cao</label>
-                  <input
-                    type="number"
-                    value={row.vandungcao}
-                    onChange={(e) => updateStructure(idx, 'vandungcao', parseInt(e.target.value) || 0)}
-                    className="input-field text-center"
-                    min={0}
-                  />
+                  <input type="number" value={row.vandungcao} onChange={(e) => updateStructure(idx, 'vandungcao', parseInt(e.target.value) || 0)} className="input-field text-center" min={0} />
                 </div>
               </div>
             </div>
