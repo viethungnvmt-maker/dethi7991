@@ -1,8 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
-const MODELS = ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
 
-export async function callGeminiAI(prompt: string, apiKey: string, modelName: string = 'gemini-2.0-flash') {
+export async function callGeminiAI(prompt: string, apiKey: string, modelName: string = 'gemini-2.5-flash') {
   if (!apiKey) {
     throw new Error('Vui lòng cấu hình API Key trong phần cài đặt.');
   }
@@ -31,7 +31,7 @@ export async function callGeminiWithFile(
   fileBase64: string,
   mimeType: string,
   apiKey: string,
-  modelName: string = 'gemini-2.0-flash'
+  modelName: string = 'gemini-2.5-flash'
 ) {
   if (!apiKey) {
     throw new Error('Vui lòng cấu hình API Key trong phần cài đặt.');
@@ -91,18 +91,28 @@ Lưu ý:
 - "week" là tuần dạy (ví dụ: "Tuần 1-2" hoặc "Tuần 5")
 - CHỈ trả về JSON thuần, không có text nào khác`,
 
-  GENERATE_MATRIX: (subject: string, ppct: string) => `
-    Dựa trên kế hoạch dạy học (PPCT) sau của môn ${subject}:
-    ${ppct}
-    
-    Hãy đề xuất một ma trận đề kiểm tra định kỳ bao gồm các chủ đề chính, số tiết và phân bổ câu hỏi theo 4 mức độ: Biết, Hiểu, Vận dụng, Vận dụng cao.
-    Trả về kết quả dưới dạng JSON có cấu trúc:
-    {
-      "matrix": [
-        { "topic": "Tên chương/chủ đề", "periods": 5, "know": 2, "understand": 2, "apply": 1, "applyHigh": 0 }
-      ]
-    }
-  `,
+  GENERATE_MATRIX: (subject: string, ppct: string, examType: string, duration: number, structure: string) => `
+Hãy tạo MA TRẬN ĐỀ KIỂM TRA cho môn ${subject}.
+Loại kiểm tra: ${examType}, Thời gian: ${duration} phút.
+
+Thông tin PPCT (các bài đã chọn):
+${ppct}
+
+Cấu trúc đề thi:
+${structure}
+
+Trả về một file HTML HOÀN CHỈNH (bao gồm <!DOCTYPE html>, <html>, <head>, <body>) chứa bảng ma trận đề kiểm tra theo CV 7991.
+
+Yêu cầu:
+1. Tiêu đề: "MA TRẬN ĐỀ KIỂM TRA ${examType.toUpperCase()} – ${subject.toUpperCase()} ${('KHỐI ...')}"
+2. Dưới tiêu đề: "NĂM HỌC 20... - 20..."
+3. Bảng có các cột: TT, Chương/Chủ đề, Nội dung/Đơn vị kiến thức, Mức độ đánh giá (TNKQ: Biết/Hiểu/VD và TL: Biết/Hiểu/VD), Tổng số câu, Tỉ lệ % điểm
+4. Mỗi chủ đề có rowspan phù hợp với số bài
+5. Hàng cuối: Tổng số câu, Tổng số điểm, Tỉ lệ % điểm
+6. Ghi chú bên dưới bảng
+7. Style CSS inline trong <style> tag: font Times New Roman, border collapse, padding 4px 6px
+
+CHỈ trả về HTML thuần, KHÔNG có markdown code block, KHÔNG có giải thích.`,
   GENERATE_QUESTIONS: (subject: string, topic: string, level: string, count: number) => `
     Hãy soạn ${count} câu hỏi trắc nghiệm cho môn ${subject}, chủ đề "${topic}" ở mức độ "${level}".
     Yêu cầu:

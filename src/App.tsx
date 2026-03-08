@@ -14,6 +14,10 @@ import {
   Check,
   Filter,
   Loader2,
+  Download,
+  FileText,
+  Code,
+  Eye,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
@@ -71,7 +75,7 @@ const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [model, setModel] = useState(() => localStorage.getItem('gemini_model') || 'gemini-2.0-flash');
+  const [model, setModel] = useState(() => localStorage.getItem('gemini_model') || 'gemini-2.5-flash');
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   // Step 1 state
@@ -84,6 +88,7 @@ export default function App() {
   const [ppctData, setPpctData] = useState<PPCTSemester[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [filterBySemester, setFilterBySemester] = useState(false);
+  const [matrixHtml, setMatrixHtml] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -160,10 +165,14 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Parse PPCT error:', error);
+      const errMsg = error?.message || JSON.stringify(error) || '';
+      const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota');
       Swal.fire({
-        title: 'Lỗi phân tích',
-        text: error.message || 'Không thể phân tích file PPCT',
-        icon: 'error',
+        title: isQuota ? 'Hết quota API' : 'Lỗi phân tích',
+        html: isQuota
+          ? 'API Key đã hết lượt gọi miễn phí.<br><br>💡 <b>Giải pháp:</b><br>• Đợi vài phút rồi thử lại<br>• Đổi sang model khác trong "Cài đặt API Key"<br>• Hoặc nâng cấp API Key lên gói trả phí'
+          : (errMsg.length > 200 ? errMsg.substring(0, 200) + '...' : errMsg) || 'Không thể phân tích file PPCT',
+        icon: isQuota ? 'warning' : 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
         color: '#e2e8f0',
@@ -216,25 +225,30 @@ export default function App() {
     }
     setIsGenerating(true);
     try {
-      // Build summary from structure
+      // Build selected topics summary
+      const selectedLessons = ppctData.flatMap(sem =>
+        sem.lessons.filter(l => l.selected).map(l => `${l.name} (${l.periods} tiết)`)
+      );
+      const ppctSummary = selectedLessons.length > 0
+        ? selectedLessons.join('\n')
+        : `Khối ${khoiLop || '10'} - Chưa có danh sách bài cụ thể`;
+
       const structureSummary = examStructure
-        .map(r => `${r.label}: Biết=${r.biet}, Hiểu=${r.hieu}, Vận dụng=${r.vandung}`)
+        .map(r => `${r.label}: Biết=${r.biet}, Hiểu=${r.hieu}, VD=${r.vandung}, VDcao=${r.vandungcao}`)
         .join('\n');
 
       const prompt = PROMPTS.GENERATE_MATRIX(
         monHoc,
-        `Khối ${khoiLop || '10'}, ${loaiKiemTra}, ${thoiGian} phút\nCấu trúc:\n${structureSummary}`
+        ppctSummary,
+        loaiKiemTra,
+        thoiGian,
+        structureSummary
       );
       const result = await callGeminiAI(prompt, apiKey, model);
 
-      Swal.fire({
-        title: 'Thành công!',
-        text: 'Đã tạo ma trận đề thi.',
-        icon: 'success',
-        confirmButtonColor: '#2dd4a8',
-        background: '#132a1f',
-        color: '#e2e8f0',
-      });
+      // Clean markdown code blocks if any
+      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      setMatrixHtml(cleanHtml);
       setCurrentStep(2);
     } catch (error: any) {
       Swal.fire({
@@ -248,6 +262,44 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const downloadAsHtml = () => {
+    const blob = new Blob([matrixHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadAsDoc = () => {
+    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'></head><body>${matrixHtml}</body></html>`;
+    const blob = new Blob([htmlWithMeta], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleUploadMatrix = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.html,.htm,.doc';
+    input.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setMatrixHtml(reader.result as string);
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
   };
 
   // ─── Step 1: Thông tin ──────────────────────────────────────────
@@ -379,8 +431,8 @@ export default function App() {
             <button
               onClick={() => setFilterBySemester(!filterBySemester)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${filterBySemester
-                  ? 'border-primary/40 text-primary bg-primary/10'
-                  : 'border-border text-slate-400 hover:text-primary'
+                ? 'border-primary/40 text-primary bg-primary/10'
+                : 'border-border text-slate-400 hover:text-primary'
                 }`}
             >
               <Filter size={12} />
@@ -415,14 +467,14 @@ export default function App() {
                           key={lesIdx}
                           onClick={() => toggleLesson(semIdx, lesIdx)}
                           className={`flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-colors ${lesson.selected
-                              ? 'bg-primary/10'
-                              : 'hover:bg-surface-light'
+                            ? 'bg-primary/10'
+                            : 'hover:bg-surface-light'
                             }`}
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${lesson.selected
-                                ? 'bg-primary border-primary'
-                                : 'border-border'
+                              ? 'bg-primary border-primary'
+                              : 'border-border'
                               }`}>
                               {lesson.selected && <Check size={10} className="text-bg" />}
                             </div>
@@ -537,14 +589,68 @@ export default function App() {
       exit={{ opacity: 0, y: -20 }}
       className="space-y-6"
     >
-      <div className="glass-card p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <span className="section-number">2</span>
-          <h2 className="text-lg font-semibold text-primary">Ma trận đề kiểm tra</h2>
+      <div className="glass-card p-6 md:p-8">
+        {/* Header + buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <span className="section-number">2</span>
+            <h2 className="text-lg font-semibold text-primary">Ma trận đề thi</h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
+              <Upload size={13} /> Upload Ma trận
+            </button>
+            <button onClick={downloadAsDoc} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <FileText size={13} /> Tải Word (.doc)
+            </button>
+            <button onClick={downloadAsHtml} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <Download size={13} /> Tải HTML
+            </button>
+            <button onClick={() => setCurrentStep(3)} className="gradient-btn flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold text-white">
+              <ArrowRight size={13} /> Tiếp theo: Bảng đặc tả
+            </button>
+          </div>
         </div>
-        <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-          <p>Ma trận sẽ được hiển thị sau khi tạo từ bước 1.</p>
-        </div>
+
+        {matrixHtml ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Source code */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Code size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
+              </div>
+              <div className="bg-bg border border-border rounded-xl overflow-hidden">
+                <textarea
+                  value={matrixHtml}
+                  onChange={(e) => setMatrixHtml(e.target.value)}
+                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+
+            {/* Right: Preview */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Eye size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
+              </div>
+              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
+                <iframe
+                  srcDoc={matrixHtml}
+                  className="w-full h-full"
+                  title="Matrix Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center min-h-[300px] text-slate-500">
+            <p>Ma trận sẽ được hiển thị sau khi tạo từ bước 1 hoặc upload file.</p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -704,7 +810,8 @@ export default function App() {
                   onChange={(e) => setModel(e.target.value)}
                   className="input-field"
                 >
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Nhanh)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Mới nhất)</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (Thông minh)</option>
                   <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                 </select>
