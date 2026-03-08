@@ -1,0 +1,5 @@
+{
+  "name": "EduGenius - Hệ thống Soạn đề 7991",
+  "description": "Ứng dụng hỗ trợ giáo viên tự động hóa quy trình soạn thảo đề kiểm tra theo tiêu chuẩn Công văn 7991 tích hợp Gemini AI.",
+  "requestFramePermissions": []
+}
