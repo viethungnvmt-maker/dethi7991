@@ -7,13 +7,17 @@ import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Upload,
-  ChevronRight,
   Clock,
   ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Check,
+  Filter,
+  Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
-import { callGeminiAI, PROMPTS } from './services/gemini';
+import { callGeminiAI, callGeminiWithFile, PROMPTS } from './services/gemini';
 
 // ─── Constants ──────────────────────────────────────────────────────
 const STEPS = [
@@ -43,6 +47,19 @@ interface ExamStructureRow {
   vandungcao: number;
 }
 
+interface PPCTLesson {
+  name: string;
+  periods: number;
+  week: string;
+  selected: boolean;
+}
+
+interface PPCTSemester {
+  name: string;
+  lessons: PPCTLesson[];
+  collapsed: boolean;
+}
+
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
   { label: 'Dạng I (4 lựa chọn)', biet: 8, hieu: 4, vandung: 0, vandungcao: 0 },
   { label: 'Dạng II (Đúng/Sai)', biet: 1, hieu: 1, vandung: 0, vandungcao: 0 },
@@ -64,6 +81,9 @@ export default function App() {
   const [thoiGian, setThoiGian] = useState(45);
   const [examStructure, setExamStructure] = useState<ExamStructureRow[]>(DEFAULT_EXAM_STRUCTURE);
   const [ppctFile, setPpctFile] = useState<File | null>(null);
+  const [ppctData, setPpctData] = useState<PPCTSemester[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [filterBySemester, setFilterBySemester] = useState(false);
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -76,6 +96,97 @@ export default function App() {
   const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung' | 'vandungcao', value: number) => {
     setExamStructure(prev => prev.map((row, i) =>
       i === index ? { ...row, [field]: Math.max(0, value) } : row
+    ));
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleParsePPCT = async (file: File) => {
+    if (!apiKey) {
+      Swal.fire({
+        title: 'Chưa có API Key',
+        text: 'Vui lòng nhập API Key để phân tích file PPCT',
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      setShowApiKeyModal(true);
+      return;
+    }
+
+    setIsParsing(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      const result = await callGeminiWithFile(
+        PROMPTS.PARSE_PPCT(),
+        base64,
+        mimeType,
+        apiKey,
+        model
+      );
+
+      // Parse JSON from response
+      const cleanResult = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[0]);
+        const semesters: PPCTSemester[] = data.semesters.map((s: any) => ({
+          name: s.name,
+          collapsed: false,
+          lessons: s.lessons.map((l: any) => ({
+            name: l.name,
+            periods: l.periods || 1,
+            week: l.week || '',
+            selected: false,
+          })),
+        }));
+        setPpctData(semesters);
+      } else {
+        throw new Error('Không thể phân tích kết quả từ AI');
+      }
+    } catch (error: any) {
+      console.error('Parse PPCT error:', error);
+      Swal.fire({
+        title: 'Lỗi phân tích',
+        text: error.message || 'Không thể phân tích file PPCT',
+        icon: 'error',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const toggleLesson = (semIdx: number, lesIdx: number) => {
+    setPpctData(prev => prev.map((sem, si) =>
+      si === semIdx ? {
+        ...sem,
+        lessons: sem.lessons.map((les, li) =>
+          li === lesIdx ? { ...les, selected: !les.selected } : les
+        )
+      } : sem
+    ));
+  };
+
+  const toggleSemesterCollapse = (semIdx: number) => {
+    setPpctData(prev => prev.map((sem, si) =>
+      si === semIdx ? { ...sem, collapsed: !sem.collapsed } : sem
     ));
   };
 
@@ -219,14 +330,30 @@ export default function App() {
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) setPpctFile(file);
+              if (file) {
+                setPpctFile(file);
+                setPpctData([]);
+                handleParsePPCT(file);
+              }
             }}
           />
           {ppctFile ? (
             <div className="flex items-center justify-between px-4 py-3 border border-primary/30 rounded-xl bg-primary/5">
-              <span className="text-sm text-primary truncate">{ppctFile.name}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                {isParsing ? (
+                  <Loader2 size={16} className="text-primary animate-spin shrink-0" />
+                ) : (
+                  <Check size={16} className="text-primary shrink-0" />
+                )}
+                <span className="text-sm text-primary truncate">{ppctFile.name}</span>
+                {isParsing && <span className="text-xs text-slate-400 shrink-0">Đang phân tích...</span>}
+              </div>
               <button
-                onClick={() => { setPpctFile(null); (document.getElementById('ppct-upload') as HTMLInputElement).value = ''; }}
+                onClick={() => {
+                  setPpctFile(null);
+                  setPpctData([]);
+                  (document.getElementById('ppct-upload') as HTMLInputElement).value = '';
+                }}
                 className="text-xs text-slate-400 hover:text-red-400 ml-3 shrink-0"
               >
                 Xóa
@@ -241,7 +368,87 @@ export default function App() {
         </div>
       </div>
 
-      {/* Card 2: Cấu trúc đề thi */}
+      {/* Card 2: Chọn chủ đề trọng tâm (after PPCT parsed) */}
+      {ppctData.length > 0 && (
+        <div className="glass-card p-6 md:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <span className="section-number">2</span>
+              <h2 className="text-lg font-semibold text-primary">Chọn chủ đề trọng tâm</h2>
+            </div>
+            <button
+              onClick={() => setFilterBySemester(!filterBySemester)}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${filterBySemester
+                  ? 'border-primary/40 text-primary bg-primary/10'
+                  : 'border-border text-slate-400 hover:text-primary'
+                }`}
+            >
+              <Filter size={12} />
+              Lọc theo kỳ
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {ppctData.map((sem, semIdx) => {
+              const totalPeriods = sem.lessons.reduce((sum, l) => sum + l.periods, 0);
+              return (
+                <div key={semIdx}>
+                  {/* Semester header */}
+                  <button
+                    onClick={() => toggleSemesterCollapse(semIdx)}
+                    className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-light transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {sem.collapsed ? <ChevronRight size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                      <span className="text-sm font-semibold text-slate-300">{sem.name}</span>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded bg-surface-light text-primary border border-border">
+                      {totalPeriods} tiết
+                    </span>
+                  </button>
+
+                  {/* Lessons list */}
+                  {!sem.collapsed && (
+                    <div className="ml-4 border-l border-border pl-3 space-y-0.5">
+                      {sem.lessons.map((lesson, lesIdx) => (
+                        <div
+                          key={lesIdx}
+                          onClick={() => toggleLesson(semIdx, lesIdx)}
+                          className={`flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-colors ${lesson.selected
+                              ? 'bg-primary/10'
+                              : 'hover:bg-surface-light'
+                            }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${lesson.selected
+                                ? 'bg-primary border-primary'
+                                : 'border-border'
+                              }`}>
+                              {lesson.selected && <Check size={10} className="text-bg" />}
+                            </div>
+                            <span className={`text-sm truncate ${lesson.selected ? 'text-slate-200' : 'text-slate-400'
+                              }`}>
+                              {lesson.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                            <span className="text-xs text-primary">{lesson.periods} tiết</span>
+                            {lesson.week && (
+                              <span className="text-xs text-slate-500">{lesson.week}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Card 3: Cấu trúc đề thi */}
       <div className="glass-card p-6 md:p-8">
         <div className="flex items-center gap-3 mb-6">
           <span className="section-number">3</span>

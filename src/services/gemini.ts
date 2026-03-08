@@ -8,7 +8,7 @@ export async function callGeminiAI(prompt: string, apiKey: string, modelName: st
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  
+
   try {
     const response = await ai.models.generateContent({
       model: modelName,
@@ -26,12 +26,76 @@ export async function callGeminiAI(prompt: string, apiKey: string, modelName: st
   }
 }
 
+export async function callGeminiWithFile(
+  prompt: string,
+  fileBase64: string,
+  mimeType: string,
+  apiKey: string,
+  modelName: string = 'gemini-2.0-flash'
+) {
+  if (!apiKey) {
+    throw new Error('Vui lòng cấu hình API Key trong phần cài đặt.');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: { data: fileBase64, mimeType } }
+        ]
+      }],
+      config: {
+        temperature: 0.3,
+        maxOutputTokens: 8192,
+      }
+    });
+
+    return response.text || '';
+  } catch (error: any) {
+    console.error('Gemini API Error:', error);
+    throw error;
+  }
+}
+
 export const PROMPTS = {
+  PARSE_PPCT: () => `Hãy phân tích file PPCT (Phân phối chương trình / Kế hoạch dạy học) này.
+Trích xuất danh sách các bài học/chủ đề, số tiết cho mỗi bài, và phân theo học kỳ.
+
+Trả về KẾT QUẢ CHÍNH XÁC dưới dạng JSON (KHÔNG có markdown, KHÔNG có code block):
+{
+  "semesters": [
+    {
+      "name": "Học kỳ 1",
+      "lessons": [
+        { "name": "Bài 1: Tên bài học", "periods": 2, "week": "Tuần 1-2" },
+        { "name": "ÔN TẬP GIỮA HỌC KỲ 1", "periods": 1, "week": "Tuần 8" }
+      ]
+    },
+    {
+      "name": "Học kỳ 2",
+      "lessons": [
+        { "name": "Bài 9: Tên bài học", "periods": 1, "week": "Tuần 19" }
+      ]
+    }
+  ]
+}
+
+Lưu ý:
+- Giữ nguyên tên bài học gốc trong file
+- Bao gồm cả các bài Ôn tập, Kiểm tra nếu có
+- "periods" là tổng số tiết dạy của bài đó
+- "week" là tuần dạy (ví dụ: "Tuần 1-2" hoặc "Tuần 5")
+- CHỈ trả về JSON thuần, không có text nào khác`,
+
   GENERATE_MATRIX: (subject: string, ppct: string) => `
     Dựa trên kế hoạch dạy học (PPCT) sau của môn ${subject}:
     ${ppct}
     
-    Hãy đề xuất một ma trận đề kiểm tra định kỳ (Giữa kỳ hoặc Cuối kỳ) bao gồm các chủ đề chính, số tiết và phân bổ câu hỏi theo 4 mức độ: Biết, Hiểu, Vận dụng, Vận dụng cao.
+    Hãy đề xuất một ma trận đề kiểm tra định kỳ bao gồm các chủ đề chính, số tiết và phân bổ câu hỏi theo 4 mức độ: Biết, Hiểu, Vận dụng, Vận dụng cao.
     Trả về kết quả dưới dạng JSON có cấu trúc:
     {
       "matrix": [
