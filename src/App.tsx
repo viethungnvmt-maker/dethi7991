@@ -710,19 +710,19 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               <div className="flex-1 grid grid-cols-4 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Biết</label>
-                  <input type="number" value={row.biet} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
+                  <input type="number" value={row.biet} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Hiểu</label>
-                  <input type="number" value={row.hieu} onChange={(e) => updateStructure(idx, 'hieu', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
+                  <input type="number" value={row.hieu} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'hieu', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
-                  <input type="number" value={row.vandung} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
+                  <input type="number" value={row.vandung} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
                   <label className="block text-xs text-primary mb-1.5">VD cao</label>
-                  <input type="number" value={row.vandungcao} onChange={(e) => updateStructure(idx, 'vandungcao', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
+                  <input type="number" value={row.vandungcao} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandungcao', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
               </div>
             </div>
