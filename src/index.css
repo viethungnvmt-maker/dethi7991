@@ -3,26 +3,48 @@
 
 @theme {
   --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
-  --color-primary: #4A90E2;
-  --color-secondary: #FF9500;
+  --color-primary: #2dd4a8;
+  --color-primary-dark: #1a9e7e;
+  --color-secondary: #34d399;
+  --color-surface: #132a1f;
+  --color-surface-light: #1a3a2a;
+  --color-bg: #0c1a14;
+  --color-border: #1e4a35;
+  --color-border-light: #2a5e42;
 }
 
 @layer base {
   body {
-    @apply bg-[#0f172a] text-slate-200 font-sans antialiased;
+    @apply bg-bg text-slate-200 font-sans antialiased;
   }
 }
 
 .glass-card {
-  @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl;
+  background: linear-gradient(145deg, rgba(19, 42, 31, 0.9), rgba(15, 35, 25, 0.95));
+  @apply border border-border rounded-2xl shadow-xl;
+}
+
+.input-field {
+  @apply w-full bg-surface border border-border rounded-lg px-4 py-3 text-slate-200
+    focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all
+    appearance-none;
+}
+
+.input-field option {
+  @apply bg-surface text-slate-200;
+}
+
+.section-number {
+  @apply w-7 h-7 rounded-full border-2 border-primary text-primary
+    flex items-center justify-center text-sm font-bold shrink-0;
 }
 
 .step-active {
-  @apply bg-primary text-white shadow-lg shadow-primary/30;
+  @apply text-primary font-semibold;
 }
 
 .step-inactive {
-  @apply bg-slate-800 text-slate-400;
+  @apply text-slate-500;
 }
 
 .gradient-text {
@@ -30,5 +52,26 @@
 }
 
 .gradient-btn {
-  @apply bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all active:scale-95;
+  @apply bg-gradient-to-r from-primary to-primary-dark hover:opacity-90 transition-all active:scale-[0.98];
+}
+
+.upload-btn {
+  @apply w-full py-3.5 border border-dashed border-border-light rounded-xl
+    text-slate-300 hover:border-primary hover:text-primary
+    transition-all flex items-center justify-center gap-2 text-sm;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-light);
 }
