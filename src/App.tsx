@@ -249,8 +249,9 @@ export default function App() {
     }
     setIsGenerating(true);
     try {
-      // Build selected topics summary
+      // Build selected topics data
       const selectedTopics: any[] = [];
+      let totalPeriods = 0;
       chapters.forEach(ch => {
         const selLessons = ch.lessons.filter(l => selectedLessons.has(l.id));
         if (selLessons.length > 0) {
@@ -258,31 +259,70 @@ export default function App() {
             name: ch.name,
             lessons: selLessons.map(l => ({ name: l.name, periods: l.periods }))
           });
+          totalPeriods += selLessons.reduce((s, l) => s + (l.periods || 1), 0);
         }
       });
-      const ppctSummary = selectedTopics.length > 0
-        ? selectedTopics.map(t => `${t.name}: ${t.lessons.map((l: any) => `${l.name} (${l.periods} tiết)`).join(', ')}`).join('\n')
-        : `Khối ${khoiLop || '10'} - Chưa có danh sách bài cụ thể`;
 
-      const structureSummary = examStructure
-        .map(r => `${r.label}: Biết=${r.biet}, Hiểu=${r.hieu}, VD=${r.vandung}, VDcao=${r.vandungcao}`)
-        .join('\n');
+      const qc = examStructure;
+      // qc[0] = Dạng I (4 lựa chọn), qc[1] = Dạng II (Đúng/Sai), qc[2] = Dạng III (Trả lời ngắn), qc[3] = Tự luận
+      const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung + qc[3].vandungcao) > 0;
 
-      const prompt = `Hãy tạo MA TRẬN ĐỀ KIỂM TRA cho môn ${monHoc}.
-Loại kiểm tra: ${loaiKiemTra}, Thời gian: ${thoiGian} phút.
+      const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
-PPCT (các bài đã chọn):
-${ppctSummary}
+**CẤU HÌNH ĐỀ THI:**
+- Loại đề: ${loaiKiemTra}
+- Thời gian: ${thoiGian} phút
+- Tổng số tiết trọng tâm: ${totalPeriods} tiết
 
-Cấu trúc đề thi:
-${structureSummary}
+**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
+- Nhiều lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
+- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
+- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
+- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
 
-Trả về Full HTML Document chứa bảng ma trận đề kiểm tra theo CV 7991.
-Style CSS inline: font Times New Roman, border collapse, padding 4px 6px.
-CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+**===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
+Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
+Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
+
+**HEADER BẢNG (4 dòng merge cells):**
+- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
+- Dòng 2: TNKQ(colspan=...)
+- Dòng 3: Nhiều lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
+- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
+
+${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
+
+**NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
+- Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
+- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
+- Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
+
+**FOOTER 3 DÒNG:**
+1. Tổng số câu theo từng cột + tổng cuối
+2. Tổng số điểm theo từng cột + tổng = 10
+3. Tỉ lệ % điểm: cuối = 100%
+
+**QUY TẮC ĐIỂM:**
+- Mọi điểm phải là bội số của 0.25
+- Tổng điểm = 10
+- Phân bổ câu hỏi theo tỷ lệ số tiết
+
+**DỮ LIỆU ĐẦU VÀO:**
+${JSON.stringify(selectedTopics, null, 2)}
+
+**YÊU CẦU OUTPUT:**
+1. Xuất Full HTML Document (<!DOCTYPE html>...)
+2. Bao gồm <style> với CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
+h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { font-weight: bold; }
+.left-align { text-align: left; padding-left: 8px; }
+.bold { font-weight: bold; }
+3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+
       const result = await callGeminiAI(prompt, apiKey, model);
-
-      // Clean markdown code blocks if any
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
       setMatrixHtml(cleanHtml);
       setCurrentStep(2);
