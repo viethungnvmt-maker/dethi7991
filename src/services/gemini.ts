@@ -19,7 +19,7 @@ export async function callGeminiAI(prompt: string, apiKey: string, modelName?: s
     const response = await ai.models.generateContent({
       model,
       contents: [{ parts: [{ text: prompt }] }],
-      config: { temperature: 0.7, maxOutputTokens: 8192 }
+      config: { temperature: 0.2, maxOutputTokens: 65536 }
     });
     return response.text || '';
   } catch (error: any) {

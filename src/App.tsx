@@ -247,6 +247,17 @@ export default function App() {
       });
       return;
     }
+    if (selectedLessons.size === 0) {
+      Swal.fire({
+        title: 'Chưa chọn bài học',
+        text: 'Vui lòng chọn ít nhất 1 bài học/chủ đề!',
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      return;
+    }
     setIsGenerating(true);
     try {
       // Build selected topics data
