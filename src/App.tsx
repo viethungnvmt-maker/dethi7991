@@ -75,7 +75,15 @@ const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [model, setModel] = useState(() => localStorage.getItem('gemini_model') || 'gemini-2.5-flash');
+  const [model, setModel] = useState(() => {
+    const saved = localStorage.getItem('gemini_model');
+    // Auto-migrate from deprecated model
+    if (saved === 'gemini-2.0-flash') {
+      localStorage.setItem('gemini_model', 'gemini-2.5-flash');
+      return 'gemini-2.5-flash';
+    }
+    return saved || 'gemini-2.5-flash';
+  });
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   // Step 1 state
@@ -144,16 +152,46 @@ export default function App() {
         model
       );
 
-      // Parse JSON from response
+      // Parse JSON from response - with robust error recovery
       const cleanResult = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[0]);
+
+      const tryParseJSON = (text: string) => {
+        // Try direct parse first
+        try { return JSON.parse(text); } catch { }
+
+        // Fix common AI JSON issues
+        let fixed = text
+          .replace(/,\s*([}\]])/g, '$1')        // trailing commas
+          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
+          .replace(/:\s*'([^']*)'/g, ': "$1"')   // single quotes to double
+          .replace(/\n/g, ' ')                    // newlines in strings
+          .replace(/\t/g, ' ');                   // tabs
+        try { return JSON.parse(fixed); } catch { }
+
+        // Try extracting just the JSON object
+        const match = fixed.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { return JSON.parse(match[0]); } catch { }
+          // Last resort: truncate at last valid closing
+          const lastBrace = match[0].lastIndexOf('}');
+          const lastBracket = match[0].lastIndexOf(']');
+          const truncated = match[0].substring(0, Math.max(lastBrace, lastBracket) + 1);
+          // Ensure balanced braces
+          const openBraces = (truncated.match(/\{/g) || []).length;
+          const closeBraces = (truncated.match(/\}/g) || []).length;
+          const balanced = truncated + '}'.repeat(Math.max(0, openBraces - closeBraces));
+          try { return JSON.parse(balanced); } catch { }
+        }
+        return null;
+      };
+
+      const data = tryParseJSON(cleanResult);
+      if (data && data.semesters) {
         const semesters: PPCTSemester[] = data.semesters.map((s: any) => ({
           name: s.name,
           collapsed: false,
-          lessons: s.lessons.map((l: any) => ({
-            name: l.name,
+          lessons: (s.lessons || []).map((l: any) => ({
+            name: l.name || 'Không rõ tên',
             periods: l.periods || 1,
             week: l.week || '',
             selected: false,
@@ -161,7 +199,7 @@ export default function App() {
         }));
         setPpctData(semesters);
       } else {
-        throw new Error('Không thể phân tích kết quả từ AI');
+        throw new Error('AI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.');
       }
     } catch (error: any) {
       console.error('Parse PPCT error:', error);
