@@ -48,7 +48,6 @@ interface ExamStructureRow {
   biet: number;
   hieu: number;
   vandung: number;
-  vandungcao: number;
 }
 
 interface Lesson {
@@ -67,10 +66,10 @@ interface Chapter {
 }
 
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
-  { label: 'Dạng I (1 lựa chọn)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
-  { label: 'Dạng II (Đúng/Sai)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
-  { label: 'Dạng III (Trả lời ngắn)', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
-  { label: 'Tự luận', biet: 0, hieu: 0, vandung: 0, vandungcao: 0 },
+  { label: 'Dạng I (1 lựa chọn)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Dạng II (Đúng/Sai)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Dạng III (Trả lời ngắn)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Tự luận', biet: 0, hieu: 0, vandung: 0 },
 ];
 
 // ─── App ────────────────────────────────────────────────────────────
@@ -111,7 +110,7 @@ export default function App() {
   }, [apiKey, model]);
 
   // ─── Handlers ───────────────────────────────────────────────────
-  const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung' | 'vandungcao', value: number) => {
+  const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung', value: number) => {
     setExamStructure(prev => prev.map((row, i) =>
       i === index ? { ...row, [field]: Math.max(0, value) } : row
     ));
@@ -276,7 +275,7 @@ export default function App() {
 
       const qc = examStructure;
       // qc[0] = Dạng I (1 lựa chọn), qc[1] = Dạng II (Đúng/Sai), qc[2] = Dạng III (Trả lời ngắn), qc[3] = Tự luận
-      const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung + qc[3].vandungcao) > 0;
+      const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung) > 0;
 
       const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
@@ -707,7 +706,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               <div className="sm:w-52 shrink-0">
                 <span className="text-sm font-medium text-primary">{row.label}</span>
               </div>
-              <div className="flex-1 grid grid-cols-4 gap-3 sm:gap-4">
+              <div className="flex-1 grid grid-cols-3 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Biết</label>
                   <input type="number" value={row.biet} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
@@ -719,10 +718,6 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
                   <input type="number" value={row.vandung} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
-                </div>
-                <div>
-                  <label className="block text-xs text-primary mb-1.5">VD cao</label>
-                  <input type="number" value={row.vandungcao} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandungcao', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
               </div>
             </div>
