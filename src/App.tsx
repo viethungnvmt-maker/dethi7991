@@ -100,6 +100,8 @@ export default function App() {
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [isParsing, setIsParsing] = useState(false);
   const [matrixHtml, setMatrixHtml] = useState('');
+  const [specsHtml, setSpecsHtml] = useState('');
+  const [examHtml, setExamHtml] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -298,23 +300,23 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
     }
   };
 
-  const downloadAsHtml = () => {
-    const blob = new Blob([matrixHtml], { type: 'text/html;charset=utf-8' });
+  const downloadHtml = (html: string, filename: string) => {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}.html`;
+    a.download = `${filename}.html`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const downloadAsDoc = () => {
-    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'></head><body>${matrixHtml}</body></html>`;
-    const blob = new Blob([htmlWithMeta], { type: 'application/msword' });
+  const downloadDoc = (html: string, filename: string) => {
+    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid black;padding:5px;vertical-align:middle;}th{font-weight:bold;}</style></head><body>${html}</body></html>`;
+    const blob = new Blob(['\uFEFF', htmlWithMeta], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}.doc`;
+    a.download = `${filename}.doc`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -334,6 +336,104 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       }
     };
     input.click();
+  };
+
+  const handleGenerateSpecs = async () => {
+    if (!matrixHtml) return;
+    setIsGenerating(true);
+    try {
+      const prompt = `Dựa trên Ma trận đề kiểm tra (HTML) đã tạo, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
+
+MA TRẬN ĐẦU VÀO:
+${matrixHtml}
+
+YÊU CẦU:
+1. Tiêu đề bảng: "ĐẶC TẢ ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}"
+2. Dưới tiêu đề: "NĂM HỌC 20... - 20..."
+3. CẤU TRÚC CỘT PHẢI KHỚP 100% với Ma trận, thêm cột "Yêu cầu cần đạt"
+4. Mỗi bài học có 2 dòng (sub-row): dòng 1 số lượng câu, dòng 2 mã năng lực (TD/GQVĐ)
+5. Footer 3 dòng: Tổng số câu, Tổng số điểm (=10), Tỉ lệ %
+6. Cột "Yêu cầu cần đạt" ghi chi tiết: Nhận biết, Thông hiểu, Vận dụng
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; margin: 20px; }
+h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { font-weight: bold; }
+.left-align, .text-left { text-align: left; padding: 6px 8px; vertical-align: top; }
+.bold { font-weight: bold; }
+
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+
+      const result = await callGeminiAI(prompt, apiKey, model);
+      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      setSpecsHtml(cleanHtml);
+      setCurrentStep(3);
+    } catch (error: any) {
+      Swal.fire({
+        title: 'Lỗi tạo đặc tả',
+        text: error.message,
+        icon: 'error',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateExam = async () => {
+    if (!specsHtml) return;
+    setIsGenerating(true);
+    try {
+      const prompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
+
+BẢNG ĐẶC TẢ:
+${specsHtml}
+
+YÊU CẦU OUTPUT:
+1. Full HTML Document (<!DOCTYPE html>...)
+2. Tiêu đề: ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}
+3. Thời gian: ${thoiGian} phút
+4. Năm học: "NĂM HỌC 20... - 20..." (để trống)
+5. Trường: "TRƯỜNG THPT ..............." (để trống)
+6. Có phần Họ tên, SBD
+7. Nội dung câu hỏi phải phù hợp với bảng đặc tả
+8. Đáp án rõ ràng ở cuối
+
+Format câu hỏi:
+- Trắc nghiệm: Câu X. Nội dung -> A. B. C. D.
+- Đúng/Sai: Câu X. Đề dẫn -> a) b) c) d)
+- Trả lời ngắn: Câu X. Nội dung
+- Tự luận: Câu X. Nội dung (nếu có)
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; margin: 20px; }
+h3, h4 { text-align: center; font-weight: bold; margin-top: 20px; }
+.question-number { font-weight: bold; }
+.options { margin-left: 20px; }
+.option-item { margin-bottom: 5px; }
+
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+
+      const result = await callGeminiAI(prompt, apiKey, model);
+      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      setExamHtml(cleanHtml);
+      setCurrentStep(4);
+    } catch (error: any) {
+      Swal.fire({
+        title: 'Lỗi tạo đề thi',
+        text: error.message,
+        icon: 'error',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // ─── Step 1: Thông tin ──────────────────────────────────────────
@@ -616,14 +716,23 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
               <Upload size={13} /> Upload Ma trận
             </button>
-            <button onClick={downloadAsDoc} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+            <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
             </button>
-            <button onClick={downloadAsHtml} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+            <button onClick={() => downloadHtml(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <Download size={13} /> Tải HTML
             </button>
-            <button onClick={() => setCurrentStep(3)} className="gradient-btn flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold text-white">
-              <ArrowRight size={13} /> Tiếp theo: Bảng đặc tả
+            <button
+              onClick={handleGenerateSpecs}
+              disabled={isGenerating || !matrixHtml}
+              className="gradient-btn flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold text-white disabled:opacity-50"
+            >
+              {isGenerating ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <ArrowRight size={13} />
+              )}
+              Tiếp theo: Bảng đặc tả
             </button>
           </div>
         </div>
@@ -679,14 +788,70 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       exit={{ opacity: 0, y: -20 }}
       className="space-y-6"
     >
-      <div className="glass-card p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <span className="section-number">3</span>
-          <h2 className="text-lg font-semibold text-primary">Bảng đặc tả</h2>
+      <div className="glass-card p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <span className="section-number">3</span>
+            <h2 className="text-lg font-semibold text-primary">Bảng đặc tả</h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <FileText size={13} /> Tải Word (.doc)
+            </button>
+            <button onClick={() => downloadHtml(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <Download size={13} /> Tải HTML
+            </button>
+            <button
+              onClick={handleGenerateExam}
+              disabled={isGenerating || !specsHtml}
+              className="gradient-btn flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold text-white disabled:opacity-50"
+            >
+              {isGenerating ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <ArrowRight size={13} />
+              )}
+              Tiếp theo: Đề thi
+            </button>
+          </div>
         </div>
-        <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-          <p>Bảng đặc tả sẽ được hiển thị sau khi hoàn thành ma trận.</p>
-        </div>
+
+        {specsHtml ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Code size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
+              </div>
+              <div className="bg-bg border border-border rounded-xl overflow-hidden">
+                <textarea
+                  value={specsHtml}
+                  onChange={(e) => setSpecsHtml(e.target.value)}
+                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Eye size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
+              </div>
+              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
+                <iframe
+                  srcDoc={specsHtml}
+                  className="w-full h-full"
+                  title="Specs Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center min-h-[300px] text-slate-500">
+            <p>Bảng đặc tả sẽ được hiển thị sau khi hoàn thành ma trận.</p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -699,14 +864,58 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       exit={{ opacity: 0, y: -20 }}
       className="space-y-6"
     >
-      <div className="glass-card p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <span className="section-number">4</span>
-          <h2 className="text-lg font-semibold text-primary">Đề thi</h2>
+      <div className="glass-card p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <span className="section-number">4</span>
+            <h2 className="text-lg font-semibold text-primary">Đề thi hoàn chỉnh</h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => downloadDoc(examHtml, `de_thi_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!examHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <FileText size={13} /> Tải Word (.doc)
+            </button>
+            <button onClick={() => downloadHtml(examHtml, `de_thi_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!examHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
+              <Download size={13} /> Tải HTML
+            </button>
+          </div>
         </div>
-        <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-          <p>Đề thi sẽ được tạo sau khi hoàn thành bảng đặc tả.</p>
-        </div>
+
+        {examHtml ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Code size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
+              </div>
+              <div className="bg-bg border border-border rounded-xl overflow-hidden">
+                <textarea
+                  value={examHtml}
+                  onChange={(e) => setExamHtml(e.target.value)}
+                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Eye size={14} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
+              </div>
+              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
+                <iframe
+                  srcDoc={examHtml}
+                  className="w-full h-full"
+                  title="Exam Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center min-h-[300px] text-slate-500">
+            <p>Đề thi sẽ được tạo sau khi hoàn thành bảng đặc tả.</p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
