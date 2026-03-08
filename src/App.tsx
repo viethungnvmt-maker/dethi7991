@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Settings, 
+import {
+  Settings,
   Upload,
-  ChevronRight, 
+  ChevronRight,
   Clock,
   ArrowRight,
 } from 'lucide-react';
@@ -29,7 +29,7 @@ const MON_HOC_LIST = [
   'Công nghệ', 'GDTC', 'Âm nhạc', 'Mĩ thuật',
 ];
 
-const KHOI_LOP_LIST = ['10', '11', '12'];
+const KHOI_LOP_LIST = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
 
 const LOAI_KIEM_TRA = [
   'Giữa kỳ 1', 'Cuối kỳ 1', 'Giữa kỳ 2', 'Cuối kỳ 2',
@@ -40,13 +40,14 @@ interface ExamStructureRow {
   biet: number;
   hieu: number;
   vandung: number;
+  vandungcao: number;
 }
 
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
-  { label: 'Dạng I (4 lựa chọn)', biet: 8, hieu: 4, vandung: 0 },
-  { label: 'Dạng II (Đúng/Sai)', biet: 1, hieu: 1, vandung: 0 },
-  { label: 'Dạng III (Trả lời ngắn)', biet: 1, hieu: 1, vandung: 2 },
-  { label: 'Tự luận', biet: 0, hieu: 1, vandung: 2 },
+  { label: 'Dạng I (4 lựa chọn)', biet: 8, hieu: 4, vandung: 0, vandungcao: 0 },
+  { label: 'Dạng II (Đúng/Sai)', biet: 1, hieu: 1, vandung: 0, vandungcao: 0 },
+  { label: 'Dạng III (Trả lời ngắn)', biet: 1, hieu: 1, vandung: 2, vandungcao: 0 },
+  { label: 'Tự luận', biet: 0, hieu: 1, vandung: 2, vandungcao: 0 },
 ];
 
 // ─── App ────────────────────────────────────────────────────────────
@@ -71,7 +72,7 @@ export default function App() {
   }, [apiKey, model]);
 
   // ─── Handlers ───────────────────────────────────────────────────
-  const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung', value: number) => {
+  const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung' | 'vandungcao', value: number) => {
     setExamStructure(prev => prev.map((row, i) =>
       i === index ? { ...row, [field]: Math.max(0, value) } : row
     ));
@@ -107,7 +108,7 @@ export default function App() {
       const structureSummary = examStructure
         .map(r => `${r.label}: Biết=${r.biet}, Hiểu=${r.hieu}, Vận dụng=${r.vandung}`)
         .join('\n');
-      
+
       const prompt = PROMPTS.GENERATE_MATRIX(
         monHoc,
         `Khối ${khoiLop || '10'}, ${loaiKiemTra}, ${thoiGian} phút\nCấu trúc:\n${structureSummary}`
@@ -195,13 +196,13 @@ export default function App() {
           {/* Thời gian */}
           <div>
             <label className="block text-sm font-medium text-primary mb-2">Thời gian (phút)</label>
-            <div className="relative">
-              <Clock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+            <div className="relative flex items-center gap-2">
+              <Clock size={16} className="text-slate-400 shrink-0" />
               <input
                 type="number"
                 value={thoiGian}
                 onChange={(e) => setThoiGian(parseInt(e.target.value) || 0)}
-                className="input-field pl-10"
+                className="input-field"
                 min={1}
               />
             </div>
@@ -233,7 +234,7 @@ export default function App() {
               </div>
 
               {/* Inputs */}
-              <div className="flex-1 grid grid-cols-3 gap-3 sm:gap-4">
+              <div className="flex-1 grid grid-cols-4 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs text-primary mb-1.5">Biết</label>
                   <input
@@ -260,6 +261,16 @@ export default function App() {
                     type="number"
                     value={row.vandung}
                     onChange={(e) => updateStructure(idx, 'vandung', parseInt(e.target.value) || 0)}
+                    className="input-field text-center"
+                    min={0}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-primary mb-1.5">VD cao</label>
+                  <input
+                    type="number"
+                    value={row.vandungcao}
+                    onChange={(e) => updateStructure(idx, 'vandungcao', parseInt(e.target.value) || 0)}
                     className="input-field text-center"
                     min={0}
                   />
@@ -395,25 +406,22 @@ export default function App() {
                 <React.Fragment key={step.id}>
                   <button
                     onClick={() => setCurrentStep(step.id)}
-                    className={`flex items-center gap-2 px-1 transition-colors ${
-                      isActive ? 'step-active' : 'step-inactive'
-                    }`}
+                    className={`flex items-center gap-2 px-1 transition-colors ${isActive ? 'step-active' : 'step-inactive'
+                      }`}
                   >
-                    <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold ${
-                      isActive
-                        ? 'bg-primary text-bg'
-                        : isCompleted
+                    <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold ${isActive
+                      ? 'bg-primary text-bg'
+                      : isCompleted
                         ? 'bg-primary/30 text-primary'
                         : 'bg-surface-light border border-border text-slate-500'
-                    }`}>
+                      }`}>
                       {step.id}
                     </span>
                     <span className="text-sm hidden sm:inline">{step.title}</span>
                   </button>
                   {idx < STEPS.length - 1 && (
-                    <div className={`w-16 sm:w-28 h-px mx-1 sm:mx-2 ${
-                      currentStep > step.id ? 'bg-primary/50' : 'bg-border'
-                    }`} />
+                    <div className={`w-16 sm:w-28 h-px mx-1 sm:mx-2 ${currentStep > step.id ? 'bg-primary/50' : 'bg-border'
+                      }`} />
                   )}
                 </React.Fragment>
               );
