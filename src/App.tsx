@@ -316,6 +316,9 @@ ${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ
 - Mọi điểm phải là bội số của 0.25
 - Tổng điểm = 10
 - Phân bổ câu hỏi theo tỷ lệ số tiết
+- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
+- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
+- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
 
 **DỮ LIỆU ĐẦU VÀO:**
 ${JSON.stringify(selectedTopics, null, 2)}
@@ -424,6 +427,7 @@ YÊU CẦU:
 4. Mỗi bài học có 2 dòng (sub-row): dòng 1 số lượng câu, dòng 2 mã năng lực (TD/GQVĐ)
 5. Footer 3 dòng: Tổng số câu, Tổng số điểm (=10), Tỉ lệ %
 6. Cột "Yêu cầu cần đạt" ghi chi tiết: Nhận biết, Thông hiểu, Vận dụng
+7. **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm.
 
 Style CSS:
 body { font-family: "Times New Roman", serif; font-size: 13pt; margin: 20px; }
@@ -480,7 +484,7 @@ YÊU CẦU OUTPUT:
 
 Format câu hỏi:
 - Trắc nghiệm: Câu X. Nội dung -> A. B. C. D.
-- Đúng/Sai: Câu X. Đề dẫn -> a) b) c) d)
+- Đúng/Sai: Câu X. Đề dẫn -> a) Mệnh đề 1 b) Mệnh đề 2 c) Mệnh đề 3 d) Mệnh đề 4. Mỗi câu có 4 mệnh đề, mỗi mệnh đề Đúng hoặc Sai, mỗi mệnh đề đúng được 0.25 điểm (tổng 1 câu = 1.0 điểm).
 - Trả lời ngắn: Câu X. Nội dung
 - Tự luận: Câu X. Nội dung (nếu có)
 
