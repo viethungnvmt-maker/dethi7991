@@ -23,24 +23,24 @@ import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
 import { callGeminiAI, parsePPCTFile } from './services/gemini';
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Constants ──────────────────────────────────────────────────────
 const STEPS = [
-  { id: 1, title: 'ThÃ´ng tin' },
-  { id: 2, title: 'Ma tráº­n' },
-  { id: 3, title: 'Báº£ng Ä‘áº·c táº£' },
-  { id: 4, title: 'Äá» thi' },
+  { id: 1, title: 'Thông tin' },
+  { id: 2, title: 'Ma trận' },
+  { id: 3, title: 'Bảng đặc tả' },
+  { id: 4, title: 'Đề thi' },
 ];
 
 const MON_HOC_LIST = [
-  'ToÃ¡n', 'Ngá»¯ vÄƒn', 'Váº­t lÃ­', 'HÃ³a há»c', 'Sinh há»c',
-  'Lá»‹ch sá»­', 'Äá»‹a lÃ­', 'GDCD', 'Tiáº¿ng Anh', 'Tin há»c',
-  'CÃ´ng nghá»‡', 'GDTC', 'Ã‚m nháº¡c', 'MÄ© thuáº­t',
+  'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
+  'Lịch sử', 'Địa lí', 'GDCD', 'Tiếng Anh', 'Tin học',
+  'Công nghệ', 'GDTC', 'Âm nhạc', 'Mĩ thuật',
 ];
 
 const KHOI_LOP_LIST = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
 
 const LOAI_KIEM_TRA = [
-  'Giá»¯a ká»³ 1', 'Cuá»‘i ká»³ 1', 'Giá»¯a ká»³ 2', 'Cuá»‘i ká»³ 2',
+  'Giữa kỳ 1', 'Cuối kỳ 1', 'Giữa kỳ 2', 'Cuối kỳ 2',
 ];
 
 interface ExamStructureRow {
@@ -66,13 +66,13 @@ interface Chapter {
 }
 
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
-  { label: 'Dáº¡ng I (1 lá»±a chá»n)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Dáº¡ng II (ÄÃºng/Sai)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Dáº¡ng III (Tráº£ lá»i ngáº¯n)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Tá»± luáº­n', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Dạng I (1 lựa chọn)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Dạng II (Đúng/Sai)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Dạng III (Trả lời ngắn)', biet: 0, hieu: 0, vandung: 0 },
+  { label: 'Tự luận', biet: 0, hieu: 0, vandung: 0 },
 ];
 
-// â”€â”€â”€ App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── App ────────────────────────────────────────────────────────────
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
@@ -90,7 +90,7 @@ export default function App() {
   // Step 1 state
   const [monHoc, setMonHoc] = useState('');
   const [khoiLop, setKhoiLop] = useState('');
-  const [loaiKiemTra, setLoaiKiemTra] = useState('Giá»¯a ká»³ 1');
+  const [loaiKiemTra, setLoaiKiemTra] = useState('Giữa kỳ 1');
   const [thoiGian, setThoiGian] = useState(45);
   const [examStructure, setExamStructure] = useState<ExamStructureRow[]>(DEFAULT_EXAM_STRUCTURE);
   const [ppctFile, setPpctFile] = useState<File | null>(null);
@@ -109,7 +109,7 @@ export default function App() {
     localStorage.setItem('gemini_model', model);
   }, [apiKey, model]);
 
-  // â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Handlers ───────────────────────────────────────────────────
   const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung', value: number) => {
     setExamStructure(prev => prev.map((row, i) =>
       i === index ? { ...row, [field]: Math.max(0, value) } : row
@@ -178,9 +178,9 @@ export default function App() {
         const wEnd = les.weekEnd || 99;
         const wStart = les.weekStart || 0;
         let match = false;
-        if (examType.includes('Giữa kỳ 1')) match = wEnd <= 10;
-        else if (examType.includes('Cuối kỳ 1')) match = wEnd <= 18;
-        else if (examType.includes('Giữa kỳ 2')) match = wStart >= 19 && wEnd <= 27;
+        if (examType.includes('Gi?a k? 1')) match = wEnd <= 10;
+        else if (examType.includes('Cu?i k? 1')) match = wEnd <= 18;
+        else if (examType.includes('Gi?a k? 2')) match = wStart >= 19 && wEnd <= 27;
         else match = true;
         if (match) selected.add(les.id);
       });
@@ -302,7 +302,7 @@ export default function App() {
       const reader = new FileReader();
       reader.onerror = () => {
         Swal.fire({
-          title: 'Lỗi đọc file',
+          title: 'Lỗi d?c file',
           text: 'Không thể đọc file đã chọn. Vui lòng thử lại với file khác.',
           icon: 'error',
           confirmButtonColor: '#2dd4a8',
@@ -349,7 +349,7 @@ export default function App() {
 
         const normalized = isFullHtmlDocument(validContent)
           ? validContent
-          : `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ma trận đề</title></head><body>${validContent}</body></html>`;
+          : `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ma tr?n d?</title></head><body>${validContent}</body></html>`;
 
         setMatrixHtml(normalized);
         setCurrentStep(2);
@@ -374,7 +374,7 @@ export default function App() {
     }
     if (!monHoc || selectedLessons.size === 0) {
       Swal.fire({
-        title: 'Thiếu dữ liệu',
+        title: 'Thi?u d? li?u',
         text: 'Vui lòng chọn môn học và ít nhất 1 bài học.',
         icon: 'warning',
         confirmButtonColor: '#2dd4a8',
@@ -401,55 +401,38 @@ export default function App() {
 
       const qc = examStructure;
       const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung) > 0;
-      const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
+      const prompt = `Hay tao **MA TRAN DE KIEM TRA** (HTML Table) cho mon **${monHoc}**, khoi **${khoiLop}**.
 
-**CẤU HÌNH ĐỀ THI:**
-- Loại đề: ${loaiKiemTra}
-- Thời gian: ${thoiGian} phút
-- Tổng số tiết trọng tâm: ${totalPeriods} tiết
+**CAU HINH DE THI:**
+- Loai de: ${loaiKiemTra}
+- Thoi gian: ${thoiGian} phut
+- Tong so tiet trong tam: ${totalPeriods} tiet
 
-**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
-- 1 lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
-- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
-- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
-- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
+**CAU TRUC SO LUONG CAU HOI (Bat buoc tuan thu):**
+- 1 lua chon (Dang I): Biet ${qc[0].biet}, Hieu ${qc[0].hieu}, VD ${qc[0].vandung}
+- Dung - Sai (Dang II): Biet ${qc[1].biet}, Hieu ${qc[1].hieu}, VD ${qc[1].vandung}
+- Tra loi ngan (Dang III): Biet ${qc[2].biet}, Hieu ${qc[2].hieu}, VD ${qc[2].vandung}
+- Tu luan: Biet ${qc[3].biet}, Hieu ${qc[3].hieu}, VD ${qc[3].vandung}
 
-**===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
-Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
-Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
+**DINH DANG BANG BAT BUOC:**
+- Tieu de: MA TRAN DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}
+- Duoi tieu de: NAM HOC 20... - 20...
+- Header 4 dong merge cells.
+- Neu khong co tu luan thi KHONG tao cot Tu luan.
+- Moi bai hoc co 2 dong sub-row: dong 1 so luong cau; dong 2 TD/GQVD.
+- Footer 3 dong: Tong so cau, Tong so diem (=10), Ti le % (=100%).
 
-**HEADER BẢNG (4 dòng merge cells):**
-- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
-- Dòng 2: TNKQ(colspan=...)
-- Dòng 3: 1 lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
-- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
+**QUY TAC DIEM:**
+- Moi diem la boi so cua 0.25.
+- Tong diem toan bai = 10.
+- Dang II (Dung/Sai): 1 cau = 1.0 diem.
 
-${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
-
-**NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
-- Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
-- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
-- Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
-
-**FOOTER 3 DÒNG:**
-1. Tổng số câu theo từng cột + tổng cuối
-2. Tổng số điểm theo từng cột + tổng = 10
-3. Tỉ lệ % điểm: cuối = 100%
-
-**QUY TẮC ĐIỂM:**
-- Mọi điểm phải là bội số của 0.25
-- Tổng điểm = 10
-- Phân bổ câu hỏi theo tỷ lệ số tiết
-- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
-- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
-- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
-
-**DỮ LIỆU ĐẦU VÀO:**
+**DU LIEU DAU VAO:**
 ${JSON.stringify(selectedTopics, null, 2)}
 
-**YÊU CẦU OUTPUT:**
-1. Xuất Full HTML Document (<!DOCTYPE html>...)
-2. Bao gồm <style> với CSS:
+**YEU CAU OUTPUT:**
+1. Full HTML Document (<!DOCTYPE html>...)
+2. Co <style> voi CSS:
 body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
 h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
@@ -457,7 +440,7 @@ th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical
 th { font-weight: bold; }
 .left-align { text-align: left; padding-left: 8px; }
 .bold { font-weight: bold; }
-3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+3. Chi tra ve HTML thuan, khong markdown code block.`;
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = stripMarkdownFences(result).trim();
       setMatrixHtml(cleanHtml);
@@ -479,70 +462,26 @@ th { font-weight: bold; }
     if (!matrixHtml) return;
     setIsGenerating(true);
     try {
-      const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
+      const prompt = `Dua tren Ma tran de kiem tra (HTML) da tao, hay tao BANG DAC TA DE KIEM TRA (Full HTML Document).
 
-**CẤU HÌNH ĐỀ THI:**
-- Loại đề: ${loaiKiemTra}
-- Thời gian: ${thoiGian} phút
-- Tổng số tiết trọng tâm: ${totalPeriods} tiết
+MA TRAN DAU VAO:
+${matrixHtml}
 
-**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
-- 1 lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
-- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
-- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
-- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
+YEU CAU:
+1. Tieu de bang: "DAC TA DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()}"
+2. Duoi tieu de: "NAM HOC 20... - 20..."
+3. Cau truc cot khop voi Ma tran, them cot "Yeu cau can dat".
+4. Moi bai hoc co 2 dong (sub-row).
+5. Footer 3 dong: Tong so cau, Tong so diem (=10), Ti le %.
+6. Chi tra ve HTML thuan, khong markdown code block.`;
 
-**===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
-Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
-Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
-
-**HEADER BẢNG (4 dòng merge cells):**
-- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
-- Dòng 2: TNKQ(colspan=...)
-- Dòng 3: 1 lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
-- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
-
-${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
-
-**NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
-- Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
-- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
-- Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
-
-**FOOTER 3 DÒNG:**
-1. Tổng số câu theo từng cột + tổng cuối
-2. Tổng số điểm theo từng cột + tổng = 10
-3. Tỉ lệ % điểm: cuối = 100%
-
-**QUY TẮC ĐIỂM:**
-- Mọi điểm phải là bội số của 0.25
-- Tổng điểm = 10
-- Phân bổ câu hỏi theo tỷ lệ số tiết
-- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
-- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
-- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
-
-**DỮ LIỆU ĐẦU VÀO:**
-${JSON.stringify(selectedTopics, null, 2)}
-
-**YÊU CẦU OUTPUT:**
-1. Xuất Full HTML Document (<!DOCTYPE html>...)
-2. Bao gồm <style> với CSS:
-body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
-h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
-th { font-weight: bold; }
-.left-align { text-align: left; padding-left: 8px; }
-.bold { font-weight: bold; }
-3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
       setSpecsHtml(cleanHtml);
       setCurrentStep(3);
     } catch (error: any) {
       Swal.fire({
-        title: 'Lá»—i táº¡o Ä‘áº·c táº£',
+        title: 'Loi tao dac ta',
         text: error.message,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
@@ -558,70 +497,27 @@ th { font-weight: bold; }
     if (!specsHtml) return;
     setIsGenerating(true);
     try {
-      const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
+      const prompt = `Dua tren Bang dac ta (HTML) sau, hay soan DE THI HOAN CHINH va HUONG DAN CHAM.
 
-**CẤU HÌNH ĐỀ THI:**
-- Loại đề: ${loaiKiemTra}
-- Thời gian: ${thoiGian} phút
-- Tổng số tiết trọng tâm: ${totalPeriods} tiết
+BANG DAC TA:
+${specsHtml}
 
-**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
-- 1 lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
-- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
-- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
-- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
+YEU CAU OUTPUT:
+1. Full HTML Document (<!DOCTYPE html>...)
+2. Tieu de: DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()}
+3. Thoi gian: ${thoiGian} phut
+4. Co thong tin truong, nam hoc, ho ten, SBD.
+5. Noi dung cau hoi phu hop voi bang dac ta.
+6. Co dap an o cuoi bai, trinh bay theo bang.
+7. Chi tra ve HTML thuan, khong markdown code block.`;
 
-**===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
-Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
-Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
-
-**HEADER BẢNG (4 dòng merge cells):**
-- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
-- Dòng 2: TNKQ(colspan=...)
-- Dòng 3: 1 lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
-- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
-
-${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
-
-**NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
-- Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
-- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
-- Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
-
-**FOOTER 3 DÒNG:**
-1. Tổng số câu theo từng cột + tổng cuối
-2. Tổng số điểm theo từng cột + tổng = 10
-3. Tỉ lệ % điểm: cuối = 100%
-
-**QUY TẮC ĐIỂM:**
-- Mọi điểm phải là bội số của 0.25
-- Tổng điểm = 10
-- Phân bổ câu hỏi theo tỷ lệ số tiết
-- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
-- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
-- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
-
-**DỮ LIỆU ĐẦU VÀO:**
-${JSON.stringify(selectedTopics, null, 2)}
-
-**YÊU CẦU OUTPUT:**
-1. Xuất Full HTML Document (<!DOCTYPE html>...)
-2. Bao gồm <style> với CSS:
-body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
-h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
-th { font-weight: bold; }
-.left-align { text-align: left; padding-left: 8px; }
-.bold { font-weight: bold; }
-3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
       setExamHtml(cleanHtml);
       setCurrentStep(4);
     } catch (error: any) {
       Swal.fire({
-        title: 'Lá»—i táº¡o Ä‘á» thi',
+        title: 'Loi tao de thi',
         text: error.message,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
@@ -633,7 +529,7 @@ th { font-weight: bold; }
     }
   };
 
-  // â”€â”€â”€ Step 1: ThÃ´ng tin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Step 1: Thông tin ──────────────────────────────────────────
   const renderStep1 = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -642,43 +538,43 @@ th { font-weight: bold; }
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Card 1: ThÃ´ng tin chung & Upload PPCT */}
+      {/* Card 1: Thông tin chung & Upload PPCT */}
       <div className="glass-card p-6 md:p-8">
         <div className="flex items-center gap-3 mb-6">
           <span className="section-number">1</span>
-          <h2 className="text-lg font-semibold text-primary">ThÃ´ng tin chung & Upload PPCT</h2>
+          <h2 className="text-lg font-semibold text-primary">Thông tin chung & Upload PPCT</h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-          {/* MÃ´n há»c */}
+          {/* Môn học */}
           <div>
-            <label className="block text-sm font-medium text-primary mb-2">MÃ´n há»c</label>
+            <label className="block text-sm font-medium text-primary mb-2">Môn học</label>
             <select
               value={monHoc}
               onChange={(e) => setMonHoc(e.target.value)}
               className="input-field"
             >
-              <option value="">-- Chá»n mÃ´n há»c --</option>
+              <option value="">-- Chọn môn học --</option>
               {MON_HOC_LIST.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 
-          {/* Khá»‘i lá»›p */}
+          {/* Khối lớp */}
           <div>
-            <label className="block text-sm font-medium text-primary mb-2">Khá»‘i lá»›p</label>
+            <label className="block text-sm font-medium text-primary mb-2">Khối lớp</label>
             <select
               value={khoiLop}
               onChange={(e) => setKhoiLop(e.target.value)}
               className="input-field"
             >
-              <option value="">-- Chá»n khá»‘i lá»›p --</option>
-              {KHOI_LOP_LIST.map(k => <option key={k} value={k}>Khá»‘i {k}</option>)}
+              <option value="">-- Chọn khối lớp --</option>
+              {KHOI_LOP_LIST.map(k => <option key={k} value={k}>Khối {k}</option>)}
             </select>
           </div>
 
-          {/* Loáº¡i kiá»ƒm tra */}
+          {/* Loại kiểm tra */}
           <div>
-            <label className="block text-sm font-medium text-primary mb-2">Loáº¡i kiá»ƒm tra (Auto Filter)</label>
+            <label className="block text-sm font-medium text-primary mb-2">Loại kiểm tra (Auto Filter)</label>
             <select
               value={loaiKiemTra}
               onChange={(e) => setLoaiKiemTra(e.target.value)}
@@ -688,9 +584,9 @@ th { font-weight: bold; }
             </select>
           </div>
 
-          {/* Thá»i gian */}
+          {/* Thời gian */}
           <div>
-            <label className="block text-sm font-medium text-primary mb-2">Thá»i gian (phÃºt)</label>
+            <label className="block text-sm font-medium text-primary mb-2">Thời gian (phút)</label>
             <div className="relative flex items-center gap-2">
               <Clock size={16} className="text-slate-400 shrink-0" />
               <input
@@ -730,7 +626,7 @@ th { font-weight: bold; }
                   <Check size={16} className="text-primary shrink-0" />
                 )}
                 <span className="text-sm text-primary truncate">{ppctFile.name}</span>
-                {isParsing && <span className="text-xs text-slate-400 shrink-0">Äang phÃ¢n tÃ­ch...</span>}
+                {isParsing && <span className="text-xs text-slate-400 shrink-0">Đang phân tích...</span>}
               </div>
               <button
                 onClick={() => {
@@ -741,7 +637,7 @@ th { font-weight: bold; }
                 }}
                 className="text-xs text-slate-400 hover:text-red-400 ml-3 shrink-0"
               >
-                XÃ³a
+                Xóa
               </button>
             </div>
           ) : (
@@ -753,20 +649,20 @@ th { font-weight: bold; }
         </div>
       </div>
 
-      {/* Card 2: Chá»n chá»§ Ä‘á» trá»ng tÃ¢m (after PPCT parsed) */}
+      {/* Card 2: Chọn chủ đề trọng tâm (after PPCT parsed) */}
       {chapters.length > 0 && (
         <div className="glass-card p-6 md:p-8">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <span className="section-number">2</span>
-              <h2 className="text-lg font-semibold text-primary">Chá»n chá»§ Ä‘á» trá»ng tÃ¢m</h2>
+              <h2 className="text-lg font-semibold text-primary">Chọn chủ đề trọng tâm</h2>
             </div>
             <button
               onClick={() => autoSelectByExamType(loaiKiemTra, chapters)}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-slate-400 hover:text-primary transition-colors"
             >
               <Filter size={12} />
-              Lá»c theo ká»³
+              Lọc theo kỳ
             </button>
           </div>
 
@@ -792,7 +688,7 @@ th { font-weight: bold; }
                     />
                     <div className="flex-1 text-sm font-semibold text-slate-200">{chapter.name}</div>
                     <span className="text-xs px-2 py-0.5 rounded bg-surface-light text-primary border border-border ml-2">
-                      {chapter.totalPeriods} tiáº¿t
+                      {chapter.totalPeriods} tiết
                     </span>
                   </div>
 
@@ -820,9 +716,9 @@ th { font-weight: bold; }
                             </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-3">
-                            <span className="text-xs text-primary">{lesson.periods} tiáº¿t</span>
+                            <span className="text-xs text-primary">{lesson.periods} tiết</span>
                             {lesson.weekEnd && (
-                              <span className="text-xs text-slate-500">Tuáº§n {lesson.weekStart}-{lesson.weekEnd}</span>
+                              <span className="text-xs text-slate-500">Tuần {lesson.weekStart}-{lesson.weekEnd}</span>
                             )}
                           </div>
                         </div>
@@ -835,16 +731,16 @@ th { font-weight: bold; }
           </div>
 
           <div className="mt-4 flex items-center text-sm text-primary px-3 py-2 rounded-lg bg-surface-light border border-border">
-            ÄÃ£ chá»n: <strong className="ml-1">{selectedLessons.size}</strong>&nbsp;bÃ i há»c
+            Đã chọn: <strong className="ml-1">{selectedLessons.size}</strong>&nbsp;bài học
           </div>
         </div>
       )}
 
-      {/* Card 3: Cáº¥u trÃºc Ä‘á» thi */}
+      {/* Card 3: Cấu trúc đề thi */}
       <div className="glass-card p-6 md:p-8">
         <div className="flex items-center gap-3 mb-6">
           <span className="section-number">3</span>
-          <h2 className="text-lg font-semibold text-primary">Cáº¥u trÃºc Ä‘á» thi (Sá»‘ lÆ°á»£ng cÃ¢u há»i)</h2>
+          <h2 className="text-lg font-semibold text-primary">Cấu trúc đề thi (Số lượng câu hỏi)</h2>
         </div>
 
         <div className="space-y-5">
@@ -855,15 +751,15 @@ th { font-weight: bold; }
               </div>
               <div className="flex-1 grid grid-cols-3 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-xs text-primary mb-1.5">Biáº¿t</label>
+                  <label className="block text-xs text-primary mb-1.5">Biết</label>
                   <input type="number" value={row.biet} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
-                  <label className="block text-xs text-primary mb-1.5">Hiá»ƒu</label>
+                  <label className="block text-xs text-primary mb-1.5">Hiểu</label>
                   <input type="number" value={row.hieu} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'hieu', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
                 <div>
-                  <label className="block text-xs text-primary mb-1.5">Váº­n dá»¥ng</label>
+                  <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
                   <input type="number" value={row.vandung} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
                 </div>
               </div>
@@ -872,7 +768,7 @@ th { font-weight: bold; }
         </div>
       </div>
 
-      {/* Button: Táº¡o Ma tráº­n */}
+      {/* Button: Tạo Ma trận */}
       <div className="flex justify-end pt-2">
         <button
           onClick={handleGenerateMatrix}
@@ -884,13 +780,13 @@ th { font-weight: bold; }
           ) : (
             <ArrowRight size={18} />
           )}
-          Táº¡o Ma tráº­n Ä‘á» thi
+          Tạo Ma trận đề thi
         </button>
       </div>
     </motion.div>
   );
 
-  // â”€â”€â”€ Step 2: Ma tráº­n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Step 2: Ma trận ────────────────────────────────────────────
   const renderStep2 = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -903,17 +799,17 @@ th { font-weight: bold; }
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <span className="section-number">2</span>
-            <h2 className="text-lg font-semibold text-primary">Ma tráº­n Ä‘á» thi</h2>
+            <h2 className="text-lg font-semibold text-primary">Ma trận đề thi</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
               <Upload size={13} /> Upload Matrix (.html/.doc)
             </button>
             <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <FileText size={13} /> Táº£i Word (.doc)
+              <FileText size={13} /> Tải Word (.doc)
             </button>
             <button onClick={() => downloadHtml(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <Download size={13} /> Táº£i HTML
+              <Download size={13} /> Tải HTML
             </button>
             <button
               onClick={handleGenerateSpecs}
@@ -925,7 +821,7 @@ th { font-weight: bold; }
               ) : (
                 <ArrowRight size={13} />
               )}
-              Tiáº¿p theo: Báº£ng Ä‘áº·c táº£
+              Tiếp theo: Bảng đặc tả
             </button>
           </div>
         </div>
@@ -952,7 +848,7 @@ th { font-weight: bold; }
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trÆ°á»›c</span>
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
               </div>
               <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
                 <iframe
@@ -966,14 +862,14 @@ th { font-weight: bold; }
           </div>
         ) : (
           <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-            <p>Ma tráº­n sáº½ Ä‘Æ°á»£c hiá»ƒn thá»‹ sau khi táº¡o tá»« bÆ°á»›c 1 hoáº·c upload file.</p>
+            <p>Ma trận sẽ được hiển thị sau khi tạo từ bước 1 hoặc upload file.</p>
           </div>
         )}
       </div>
     </motion.div>
   );
 
-  // â”€â”€â”€ Step 3: Báº£ng Ä‘áº·c táº£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Step 3: Bảng đặc tả ──────────────────────────────────────
   const renderStep3 = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -985,14 +881,14 @@ th { font-weight: bold; }
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <span className="section-number">3</span>
-            <h2 className="text-lg font-semibold text-primary">Báº£ng Ä‘áº·c táº£</h2>
+            <h2 className="text-lg font-semibold text-primary">Bảng đặc tả</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <FileText size={13} /> Táº£i Word (.doc)
+              <FileText size={13} /> Tải Word (.doc)
             </button>
             <button onClick={() => downloadHtml(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <Download size={13} /> Táº£i HTML
+              <Download size={13} /> Tải HTML
             </button>
             <button
               onClick={handleGenerateExam}
@@ -1004,7 +900,7 @@ th { font-weight: bold; }
               ) : (
                 <ArrowRight size={13} />
               )}
-              Tiáº¿p theo: Äá» thi
+              Tiếp theo: Đề thi
             </button>
           </div>
         </div>
@@ -1028,7 +924,7 @@ th { font-weight: bold; }
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trÆ°á»›c</span>
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
               </div>
               <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
                 <iframe
@@ -1042,14 +938,14 @@ th { font-weight: bold; }
           </div>
         ) : (
           <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-            <p>Báº£ng Ä‘áº·c táº£ sáº½ Ä‘Æ°á»£c hiá»ƒn thá»‹ sau khi hoÃ n thÃ nh ma tráº­n.</p>
+            <p>Bảng đặc tả sẽ được hiển thị sau khi hoàn thành ma trận.</p>
           </div>
         )}
       </div>
     </motion.div>
   );
 
-  // â”€â”€â”€ Step 4: Äá» thi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Step 4: Đề thi ────────────────────────────────────────────
   const renderStep4 = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1061,14 +957,14 @@ th { font-weight: bold; }
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <span className="section-number">4</span>
-            <h2 className="text-lg font-semibold text-primary">Äá» thi hoÃ n chá»‰nh</h2>
+            <h2 className="text-lg font-semibold text-primary">Đề thi hoàn chỉnh</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => downloadDoc(examHtml, `de_thi_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!examHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <FileText size={13} /> Táº£i Word (.doc)
+              <FileText size={13} /> Tải Word (.doc)
             </button>
             <button onClick={() => downloadHtml(examHtml, `de_thi_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`)} disabled={!examHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
-              <Download size={13} /> Táº£i HTML
+              <Download size={13} /> Tải HTML
             </button>
           </div>
         </div>
@@ -1092,7 +988,7 @@ th { font-weight: bold; }
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trÆ°á»›c</span>
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
               </div>
               <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
                 <iframe
@@ -1106,7 +1002,7 @@ th { font-weight: bold; }
           </div>
         ) : (
           <div className="flex items-center justify-center min-h-[300px] text-slate-500">
-            <p>Äá» thi sáº½ Ä‘Æ°á»£c táº¡o sau khi hoÃ n thÃ nh báº£ng Ä‘áº·c táº£.</p>
+            <p>Đề thi sẽ được tạo sau khi hoàn thành bảng đặc tả.</p>
           </div>
         )}
       </div>
@@ -1123,10 +1019,10 @@ th { font-weight: bold; }
     }
   };
 
-  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Render ─────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col">
-      {/* â”€â”€ Header â”€â”€ */}
+      {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-bg/90 backdrop-blur-lg border-b border-border px-4 sm:px-6 py-3">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -1134,7 +1030,7 @@ th { font-weight: bold; }
               <span className="text-primary font-bold text-sm">AI</span>
             </div>
             <h1 className="text-base sm:text-lg font-bold text-slate-100 tracking-tight uppercase">
-              Táº¡o Äá» Thi Theo CV 7991
+              Tạo Đề Thi Theo CV 7991
             </h1>
           </div>
 
@@ -1143,12 +1039,12 @@ th { font-weight: bold; }
             className="flex items-center gap-2 text-sm text-slate-400 hover:text-primary transition-colors"
           >
             <Settings size={16} />
-            <span className="hidden sm:inline">CÃ i Ä‘áº·t API Key</span>
+            <span className="hidden sm:inline">Cài đặt API Key</span>
           </button>
         </div>
       </header>
 
-      {/* â”€â”€ Main â”€â”€ */}
+      {/* ── Main ── */}
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8">
         {/* Stepper */}
         <div className="mb-10">
@@ -1191,7 +1087,7 @@ th { font-weight: bold; }
         </div>
       </main>
 
-      {/* â”€â”€ API Key Modal â”€â”€ */}
+      {/* ── API Key Modal ── */}
       {showApiKeyModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div
@@ -1200,7 +1096,7 @@ th { font-weight: bold; }
             className="glass-card p-6 md:p-8 w-full max-w-lg"
           >
             <h3 className="text-lg font-semibold text-primary mb-6 flex items-center gap-2">
-              <Settings size={20} /> CÃ i Ä‘áº·t API Key
+              <Settings size={20} /> Cài đặt API Key
             </h3>
 
             <div className="space-y-4">
@@ -1211,10 +1107,10 @@ th { font-weight: bold; }
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   className="input-field"
-                  placeholder="Nháº­p API Key..."
+                  placeholder="Nhập API Key..."
                 />
                 <p className="mt-2 text-xs text-slate-500">
-                  Láº¥y API Key táº¡i{' '}
+                  Lấy API Key tại{' '}
                   <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-primary underline">
                     Google AI Studio
                   </a>
@@ -1228,9 +1124,9 @@ th { font-weight: bold; }
                   onChange={(e) => setModel(e.target.value)}
                   className="input-field"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Má»›i nháº¥t)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Mới nhất)</option>
                   <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (ThÃ´ng minh)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (Thông minh)</option>
                   <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                 </select>
               </div>
@@ -1241,13 +1137,13 @@ th { font-weight: bold; }
                 onClick={() => setShowApiKeyModal(false)}
                 className="px-5 py-2.5 rounded-lg text-sm text-slate-400 hover:text-white transition-colors border border-border hover:border-border-light"
               >
-                ÄÃ³ng
+                Đóng
               </button>
               <button
                 onClick={() => setShowApiKeyModal(false)}
                 className="gradient-btn px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
               >
-                LÆ°u
+                Lưu
               </button>
             </div>
           </motion.div>
@@ -1256,6 +1152,10 @@ th { font-weight: bold; }
     </div>
   );
 }
+
+
+
+
 
 
 
