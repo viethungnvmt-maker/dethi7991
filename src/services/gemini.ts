@@ -1,16 +1,16 @@
-﻿import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
-// Helpers
+// ─── Helpers ────────────────────────────────────────────────────────
 const getApiKey = (): string => localStorage.getItem('gemini_api_key') || '';
 const getModel = (): string => localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
 
 const createAI = (apiKey?: string) => {
   const key = apiKey || getApiKey();
-  if (!key) throw new Error('Vui long cau hinh API Key trong phan cai dat.');
+  if (!key) throw new Error('Vui lòng cấu hình API Key trong phần cài đặt.');
   return new GoogleGenAI({ apiKey: key });
 };
 
-// Generic AI call
+// ─── Generic AI call ────────────────────────────────────────────────
 export async function callGeminiAI(prompt: string, apiKey: string, modelName?: string) {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
@@ -19,7 +19,7 @@ export async function callGeminiAI(prompt: string, apiKey: string, modelName?: s
     const response = await ai.models.generateContent({
       model,
       contents: [{ parts: [{ text: prompt }] }],
-      config: { temperature: 0.2, maxOutputTokens: 65536 },
+      config: { temperature: 0.2, maxOutputTokens: 65536 }
     });
     return response.text || '';
   } catch (error: any) {
@@ -28,40 +28,55 @@ export async function callGeminiAI(prompt: string, apiKey: string, modelName?: s
   }
 }
 
-// Parse PPCT file
+// ─── Parse PPCT file ────────────────────────────────────────────────
 export async function parsePPCTFile(
   file: File,
   fileBase64: string,
   subject: string,
   grade: string,
   apiKey: string,
-  modelName?: string,
+  modelName?: string
 ): Promise<any> {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
+
+  // Reference site uses text/plain for docx, application/pdf for pdf
   const mimeType = file.type === 'application/pdf' ? 'application/pdf' : 'text/plain';
 
-  const subjectFilter = subject && grade
-    ? `\nBAT BUOC: Chi trich xuat noi dung mon "${subject}" lop "${grade}". Bo qua mon/lop khac.`
-    : '';
+  let subjectFilter = '';
+  if (subject && grade) {
+    subjectFilter = `
+**ĐẶC BIỆT LƯU Ý MÔN VÀ LỚP BẮT BUỘC:**
+- Người dùng ĐÃ CHỌN TRƯỚC: Môn học là "${subject}" và Khối lớp là "${grade}".
+- TUYỆT ĐỐI CHỈ trích xuất nội dung của môn "${subject}" lớp "${grade}".
+- NẾU file có chứa nhiều môn khác hay khối lớp khác, HÃY BỎ QUA chúng.
+`;
+  }
 
-  const prompt = `Ban la chuyen gia phan tich chuong trinh giao duc Viet Nam.
-Hay doc file dinh kem va trich xuat du lieu thanh JSON object (khong markdown).
+  const prompt = `Bạn là chuyên gia phân tích chương trình giáo dục Việt Nam.
+Hãy đọc file đính kèm (Kế hoạch dạy học/PPCT) và trích xuất dữ liệu cấu trúc cực kỳ chi tiết.
 
-Yeu cau JSON:
+**===== NGUYÊN TẮC VÀNG: CHỈ TRÍCH XUẤT, KHÔNG SÁNG TẠO =====**
+1. TUYỆT ĐỐI CHỈ trích xuất nội dung CÓ SẴN trong file đính kèm. KHÔNG ĐƯỢC tự bịa đặt.
+2. Tên môn học, tên chương, tên bài học PHẢI lấy NGUYÊN VĂN từ file gốc.
+3. Nếu không đọc được rõ một phần nào đó trong file, hãy ghi "Không đọc được".
+${subjectFilter}
+**NGÔN NGỮ BẮT BUỘC: TIẾNG VIỆT**
+
+Yêu cầu đầu ra: JSON Object (không markdown) với cấu trúc sau:
 {
-  "subject": "...",
-  "grade": "...",
+  "subject": "Tên môn học chính xác như trong file",
+  "grade": "Khối lớp chính xác như trong file",
   "chapters": [
     {
       "id": "c1",
-      "name": "Ten chuong",
-      "totalPeriods": 0,
+      "name": "Tên chương CHÍNH XÁC từ file gốc",
+      "totalPeriods": 10,
       "lessons": [
         {
           "id": "c1_l1",
-          "name": "Ten bai hoc",
-          "periods": 1,
+          "name": "Tên bài học CHÍNH XÁC từ file gốc",
+          "periods": 2,
           "weekStart": 1,
           "weekEnd": 1
         }
@@ -70,39 +85,43 @@ Yeu cau JSON:
   ]
 }
 
-Chi trich xuat, khong sang tao noi dung moi.${subjectFilter}`;
+Lưu ý quan trọng:
+1. Hãy cố gắng nhận diện số tiết và tuần học của từng bài. Nếu không ghi rõ, hãy ước lượng.
+2. Nếu tài liệu là PDF dạng ảnh, hãy dùng khả năng Vision để đọc kỹ bảng biểu.
+3. Xác định chính xác môn học từ NỘI DUNG THỰC TẾ trong file.
+4. Toàn bộ giá trị JSON phải bằng TIẾNG VIỆT, trích xuất nguyên văn từ file.`;
+
+  console.log('🔄 Parsing PPCT file, model:', model, 'mimeType:', mimeType);
 
   try {
     const response = await ai.models.generateContent({
       model,
-      contents: [
-        { parts: [{ text: prompt }] },
-        {
-          parts: [{
-            inlineData: {
-              mimeType,
-              data: fileBase64,
-            },
-          }],
-        },
-      ],
-      config: { temperature: 0.1, maxOutputTokens: 65536 },
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: fileBase64 } },
+          { text: prompt }
+        ]
+      },
+      config: { responseMimeType: 'application/json' }
     });
 
-    const text = response.text || '';
-    const cleaned = text
-      .replace(/```json\s*/gi, '')
-      .replace(/```\s*/g, '')
-      .trim();
+    const text = response.text || '{}';
+    console.log('✅ PPCT parse response length:', text.length);
+    console.log('📋 PPCT parse preview:', text.substring(0, 500));
 
-    return JSON.parse(cleaned);
+    try {
+      return JSON.parse(text);
+    } catch {
+      const cleaned = text.replace(/```json/g, '').replace(/```/g, '');
+      return JSON.parse(cleaned);
+    }
   } catch (error: any) {
-    console.error('PPCT parsing error:', error);
+    console.error('❌ PPCT parse error:', error);
     throw error;
   }
 }
 
-// Generate Matrix HTML
+// ─── Generate Matrix HTML ───────────────────────────────────────────
 export async function generateMatrixHTML(
   subject: string,
   grade: string,
@@ -111,52 +130,47 @@ export async function generateMatrixHTML(
   selectedTopics: any[],
   questionConfig: any,
   apiKey: string,
-  modelName?: string,
+  modelName?: string
 ): Promise<string> {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
 
   const hasEssay = questionConfig.essay.biet + questionConfig.essay.hieu + questionConfig.essay.vandung > 0;
-  const totalPeriods = selectedTopics.reduce(
-    (acc: number, ch: any) => acc + (ch.lessons || []).reduce((sum: number, l: any) => sum + (l.periods || 1), 0),
-    0,
-  );
 
-  const prompt = `Hay tao **MA TRAN DE KIEM TRA** (HTML Table) cho mon **${subject}**, khoi **${grade}**.
+  const prompt = `Hãy tạo MA TRẬN ĐỀ KIỂM TRA (HTML Table) cho môn ${subject}, khối ${grade}.
+Loại đề: ${examType}, Thời gian: ${duration} phút.
 
-CAU HINH:
-- Loai de: ${examType}
-- Thoi gian: ${duration} phut
-- Tong so tiet trong tam: ${totalPeriods} tiet
+CẤU TRÚC SỐ LƯỢNG CÂU HỎI:
+- 1 lựa chọn (Dạng I): Biết ${questionConfig.type1.biet}, Hiểu ${questionConfig.type1.hieu}, VD ${questionConfig.type1.vandung}
+- Đúng - Sai (Dạng II): Biết ${questionConfig.type2.biet}, Hiểu ${questionConfig.type2.hieu}, VD ${questionConfig.type2.vandung}  
+- Trả lời ngắn (Dạng III): Biết ${questionConfig.type3.biet}, Hiểu ${questionConfig.type3.hieu}, VD ${questionConfig.type3.vandung}
+- Tự luận: Biết ${questionConfig.essay.biet}, Hiểu ${questionConfig.essay.hieu}, VD ${questionConfig.essay.vandung}
 
-CAU TRUC SO CAU:
-- Dang I: Biet ${questionConfig.type1.biet}, Hieu ${questionConfig.type1.hieu}, VD ${questionConfig.type1.vandung}
-- Dang II: Biet ${questionConfig.type2.biet}, Hieu ${questionConfig.type2.hieu}, VD ${questionConfig.type2.vandung}
-- Dang III: Biet ${questionConfig.type3.biet}, Hieu ${questionConfig.type3.hieu}, VD ${questionConfig.type3.vandung}
-- Tu luan: Biet ${questionConfig.essay.biet}, Hieu ${questionConfig.essay.hieu}, VD ${questionConfig.essay.vandung}
-
-DINH DANG BAT BUOC:
-- Header 4 dong merge cells
-- Co/khong co cot Tu luan theo cau hinh
-- Moi bai hoc co 2 dong sub-row (TD/GQVD)
-- Footer 3 dong
-
-DU LIEU DAU VAO:
+DỮ LIỆU ĐẦU VÀO:
 ${JSON.stringify(selectedTopics, null, 2)}
 
-OUTPUT:
-- Full HTML document
-- Co CSS bang ro rang
-- Khong markdown code block
-- hasEssay = ${hasEssay}`;
+YÊU CẦU OUTPUT:
+1. Xuất Full HTML Document (<!DOCTYPE html>...).
+2. Tiêu đề: "MA TRẬN ĐỀ KIỂM TRA ${examType.toUpperCase()} – ${subject.toUpperCase()} ${grade.toUpperCase()}"
+3. Dưới tiêu đề: "NĂM HỌC 20... - 20..."
+4. Bảng có header 4 tầng merge cells.
+5. Phân bổ câu hỏi theo tỷ lệ số tiết.
+${!hasEssay ? '6. KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : ''}
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
+h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { font-weight: bold; }`;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
-      config: { temperature: 0.2 },
+      config: { temperature: 0.2 }
     });
-    return (response.text || '').replace(/```html\s*/gi, '').replace(/```\s*/g, '').trim();
+    return (response.text || '').replace(/```html/g, '').replace(/```/g, '');
   } catch (error: any) {
     console.error('Matrix generation error:', error);
     throw error;
@@ -164,6 +178,6 @@ OUTPUT:
 }
 
 export const PROMPTS = {
-  PARSE_PPCT: () => '',
-  GENERATE_MATRIX: (_subject: string, _ppct: string, _examType: string, _duration: number, _structure: string) => '',
+  PARSE_PPCT: () => '', // Now handled by parsePPCTFile function
+  GENERATE_MATRIX: (subject: string, ppct: string, examType: string, duration: number, structure: string) => '',
 };

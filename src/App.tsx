@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -148,20 +148,28 @@ export default function App() {
       const base64 = await fileToBase64(file);
       const data = await parsePPCTFile(file, base64, monHoc, khoiLop, apiKey, model);
 
+      console.log('đăng parse PPCT data:', data);
+
       if (data.chapters && data.chapters.length > 0) {
         setChapters(data.chapters);
+        // Auto-expand and select all
         const allChapterIds = new Set(data.chapters.map((c: Chapter) => c.id));
         setExpandedChapters(allChapterIds);
+        // Auto-select based on exam type
         autoSelectByExamType(loaiKiemTra, data.chapters);
       } else {
         throw new Error('Không tìm thấy dữ liệu bài học trong file');
       }
     } catch (error: any) {
+      console.error('Parse PPCT error:', error);
       const errMsg = error?.message || JSON.stringify(error) || '';
+      const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota');
       Swal.fire({
-        title: 'Lỗi phân tích',
-        text: (errMsg.length > 220 ? `${errMsg.substring(0, 220)}...` : errMsg) || 'Không thể phân tích file PPCT',
-        icon: 'error',
+        title: isQuota ? 'Hết quota API' : 'Lỗi phân tích',
+        html: isQuota
+          ? 'API Key đã hết lượt gọi miễn phí.<br><br>💡 <b>Giải pháp:</b><br>• Đợi vài phút rồi thử lại<br>• Hoặc nâng cấp API Key lên gói trả phí'
+          : (errMsg.length > 200 ? errMsg.substring(0, 200) + '...' : errMsg) || 'Không thể phân tích file PPCT',
+        icon: isQuota ? 'warning' : 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
         color: '#e2e8f0',
@@ -178,10 +186,10 @@ export default function App() {
         const wEnd = les.weekEnd || 99;
         const wStart = les.weekStart || 0;
         let match = false;
-        if (examType.includes('Gi?a k? 1')) match = wEnd <= 10;
-        else if (examType.includes('Cu?i k? 1')) match = wEnd <= 18;
-        else if (examType.includes('Gi?a k? 2')) match = wStart >= 19 && wEnd <= 27;
-        else match = true;
+        if (examType.includes('Giữa kỳ 1')) match = wEnd <= 10;
+        else if (examType.includes('Cuối kỳ 1')) match = wEnd <= 18;
+        else if (examType.includes('Giữa kỳ 2')) match = wStart >= 19 && wEnd <= 27;
+        else match = true; // Cuối kỳ 2 or default = all
         if (match) selected.add(les.id);
       });
     });
@@ -201,7 +209,7 @@ export default function App() {
     if (!chapter) return;
     setSelectedLessons(prev => {
       const next = new Set(prev);
-      chapter.lessons.forEach(l => (checked ? next.add(l.id) : next.delete(l.id)));
+      chapter.lessons.forEach(l => checked ? next.add(l.id) : next.delete(l.id));
       return next;
     });
   };
@@ -214,156 +222,11 @@ export default function App() {
     });
   };
 
-  const stripMarkdownFences = (rawHtml: string) =>
-    rawHtml
-      .replace(/```html\s*/gi, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-  const isFullHtmlDocument = (rawHtml: string) => /<html[\s>]/i.test(rawHtml);
-
-  const extractBodyContent = (rawHtml: string) => {
-    const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    return bodyMatch?.[1]?.trim() || rawHtml;
-  };
-
-  const sanitizeFilename = (filename: string) =>
-    filename
-      .replace(/[\\/:*?"<>|]/g, '_')
-      .replace(/\s+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '') || 'tai_lieu';
-
-  const triggerFileDownload = (blob: Blob, fullFilename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fullFilename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const downloadHtml = (html: string, filename: string) => {
-    const cleanFilename = sanitizeFilename(filename);
-    const cleanHtml = stripMarkdownFences(html);
-    const htmlForDownload = isFullHtmlDocument(cleanHtml)
-      ? cleanHtml
-      : `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${cleanFilename}</title></head><body>${cleanHtml}</body></html>`;
-
-    const blob = new Blob([htmlForDownload], { type: 'text/html;charset=utf-8' });
-    triggerFileDownload(blob, `${cleanFilename}.html`);
-  };
-
-  const downloadDoc = (html: string, filename: string, landscape: boolean = false) => {
-    const pgW = landscape ? 16838 : 11906;
-    const pgH = landscape ? 11906 : 16838;
-    const wordSetup = `
-      <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom>
-        <w:Body><w:SectPr>
-          <w:pgSz w:w="${pgW}" w:h="${pgH}" ${landscape ? 'w:orient="landscape"' : ''}/>
-          <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="720" w:footer="720"/>
-        </w:SectPr></w:Body>
-      </w:WordDocument></xml>`;
-    const pageStyle = landscape
-      ? `@page { size: A4 landscape; margin: 2cm; } @page Section1 { size: 29.7cm 21cm; mso-page-orientation: landscape; margin: 2cm; }`
-      : `@page { size: A4; margin: 2cm; } @page Section1 { size: 21cm 29.7cm; margin: 2cm; }`;
-
-    const cleanFilename = sanitizeFilename(filename);
-    const cleanHtml = stripMarkdownFences(html);
-    const bodyContent = extractBodyContent(cleanHtml);
-    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'>${wordSetup}<style>${pageStyle} body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid black;padding:5px;vertical-align:middle;}th{font-weight:bold;}</style></head><body><div class="Section1">${bodyContent}</div></body></html>`;
-    const blob = new Blob(['\uFEFF', htmlWithMeta], { type: 'application/msword' });
-    triggerFileDownload(blob, `${cleanFilename}.doc`);
-  };
-
-  const handleUploadMatrix = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.html,.htm,.doc';
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      if (!['html', 'htm', 'doc'].includes(ext)) {
-        Swal.fire({
-          title: 'Định dạng chưa hỗ trợ',
-          text: 'Vui lòng chọn file .html, .htm hoặc .doc (xuất từ ứng dụng này).',
-          icon: 'warning',
-          confirmButtonColor: '#2dd4a8',
-          background: '#132a1f',
-          color: '#e2e8f0',
-        });
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onerror = () => {
-        Swal.fire({
-          title: 'Lỗi d?c file',
-          text: 'Không thể đọc file đã chọn. Vui lòng thử lại với file khác.',
-          icon: 'error',
-          confirmButtonColor: '#2dd4a8',
-          background: '#132a1f',
-          color: '#e2e8f0',
-        });
-      };
-      reader.onload = () => {
-        const buffer = reader.result as ArrayBuffer;
-        const bytes = new Uint8Array(buffer);
-        const tryDecode = (encoding: string) => {
-          try {
-            return new TextDecoder(encoding).decode(bytes);
-          } catch {
-            return '';
-          }
-        };
-
-        const validContent = [
-          tryDecode('utf-8'),
-          tryDecode('windows-1252'),
-          tryDecode('iso-8859-1'),
-        ]
-          .map(stripMarkdownFences)
-          .find((candidate) => {
-            const hasNullChar = candidate.includes('\u0000');
-            const hasHtml = /<html[\s>]|<table[\s>]|<!doctype/i.test(candidate);
-            return !hasNullChar && hasHtml;
-          });
-
-        if (!validContent) {
-          Swal.fire({
-            title: 'File không phù hợp',
-            html: ext === 'doc'
-              ? 'File .doc này có thể là định dạng Word nhị phân và không thể nạp trực tiếp.<br><br>Đã thử giải mã UTF-8 và Windows-1252 nhưng không thấy HTML hợp lệ.'
-              : 'File không chứa nội dung HTML hợp lệ để nạp lại Ma trận.',
-            icon: 'warning',
-            confirmButtonColor: '#2dd4a8',
-            background: '#132a1f',
-            color: '#e2e8f0',
-          });
-          return;
-        }
-
-        const normalized = isFullHtmlDocument(validContent)
-          ? validContent
-          : `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ma tr?n d?</title></head><body>${validContent}</body></html>`;
-
-        setMatrixHtml(normalized);
-        setCurrentStep(2);
-      };
-      reader.readAsArrayBuffer(file);
-    };
-    input.click();
-  };
-
   const handleGenerateMatrix = async () => {
     if (!apiKey) {
       Swal.fire({
         title: 'Chưa có API Key',
-        text: 'Vui lòng nhập API Key trong phần cài đặt.',
+        text: 'Vui lòng nhập API Key trong phần "Cài đặt API Key"',
         icon: 'warning',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
@@ -372,10 +235,10 @@ export default function App() {
       setShowApiKeyModal(true);
       return;
     }
-    if (!monHoc || selectedLessons.size === 0) {
+    if (!monHoc) {
       Swal.fire({
-        title: 'Thi?u d? li?u',
-        text: 'Vui lòng chọn môn học và ít nhất 1 bài học.',
+        title: 'Thiếu thông tin',
+        text: 'Vui lòng chọn môn học',
         icon: 'warning',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
@@ -383,9 +246,20 @@ export default function App() {
       });
       return;
     }
-
+    if (selectedLessons.size === 0) {
+      Swal.fire({
+        title: 'Chưa chọn bài học',
+        text: 'Vui lòng chọn ít nhất 1 bài học/chủ đề!',
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      return;
+    }
     setIsGenerating(true);
     try {
+      // Build selected topics data
       const selectedTopics: any[] = [];
       let totalPeriods = 0;
       chapters.forEach(ch => {
@@ -393,46 +267,65 @@ export default function App() {
         if (selLessons.length > 0) {
           selectedTopics.push({
             name: ch.name,
-            lessons: selLessons.map(l => ({ name: l.name, periods: l.periods })),
+            lessons: selLessons.map(l => ({ name: l.name, periods: l.periods }))
           });
-          totalPeriods += selLessons.reduce((sum, l) => sum + (l.periods || 1), 0);
+          totalPeriods += selLessons.reduce((s, l) => s + (l.periods || 1), 0);
         }
       });
 
       const qc = examStructure;
+      // qc[0] = Dạng I (1 lựa chọn), qc[1] = Dạng II (Đúng/Sai), qc[2] = Dạng III (Trả lời ngắn), qc[3] = Tự luận
       const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung) > 0;
-      const prompt = `Hay tao **MA TRAN DE KIEM TRA** (HTML Table) cho mon **${monHoc}**, khoi **${khoiLop}**.
 
-**CAU HINH DE THI:**
-- Loai de: ${loaiKiemTra}
-- Thoi gian: ${thoiGian} phut
-- Tong so tiet trong tam: ${totalPeriods} tiet
+      const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
-**CAU TRUC SO LUONG CAU HOI (Bat buoc tuan thu):**
-- 1 lua chon (Dang I): Biet ${qc[0].biet}, Hieu ${qc[0].hieu}, VD ${qc[0].vandung}
-- Dung - Sai (Dang II): Biet ${qc[1].biet}, Hieu ${qc[1].hieu}, VD ${qc[1].vandung}
-- Tra loi ngan (Dang III): Biet ${qc[2].biet}, Hieu ${qc[2].hieu}, VD ${qc[2].vandung}
-- Tu luan: Biet ${qc[3].biet}, Hieu ${qc[3].hieu}, VD ${qc[3].vandung}
+**CẤU HÌNH ĐỀ THI:**
+- Loại đề: ${loaiKiemTra}
+- Thời gian: ${thoiGian} phút
+- Tổng số tiết trọng tâm: ${totalPeriods} tiết
 
-**DINH DANG BANG BAT BUOC:**
-- Tieu de: MA TRAN DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}
-- Duoi tieu de: NAM HOC 20... - 20...
-- Header 4 dong merge cells.
-- Neu khong co tu luan thi KHONG tao cot Tu luan.
-- Moi bai hoc co 2 dong sub-row: dong 1 so luong cau; dong 2 TD/GQVD.
-- Footer 3 dong: Tong so cau, Tong so diem (=10), Ti le % (=100%).
+**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
+- 1 lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
+- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
+- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
+- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
 
-**QUY TAC DIEM:**
-- Moi diem la boi so cua 0.25.
-- Tong diem toan bai = 10.
-- Dang II (Dung/Sai): 1 cau = 1.0 diem.
+**===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
+Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
+Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
 
-**DU LIEU DAU VAO:**
+**HEADER BẢNG (4 dòng merge cells):**
+- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
+- Dòng 2: TNKQ(colspan=...)
+- Dòng 3: 1 lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
+- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
+
+${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
+
+**NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
+- Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
+- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
+- Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
+
+**FOOTER 3 DÒNG:**
+1. Tổng số câu theo từng cột + tổng cuối
+2. Tổng số điểm theo từng cột + tổng = 10
+3. Tỉ lệ % điểm: cuối = 100%
+
+**QUY TẮC ĐIỂM:**
+- Mọi điểm phải là bội số của 0.25
+- Tổng điểm = 10
+- Phân bổ câu hỏi theo tỷ lệ số tiết
+- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
+- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
+- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
+
+**DỮ LIỆU ĐẦU VÀO:**
 ${JSON.stringify(selectedTopics, null, 2)}
 
-**YEU CAU OUTPUT:**
-1. Full HTML Document (<!DOCTYPE html>...)
-2. Co <style> voi CSS:
+**YÊU CẦU OUTPUT:**
+1. Xuất Full HTML Document (<!DOCTYPE html>...)
+2. Bao gồm <style> với CSS:
 body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.3; margin: 20px; }
 h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
@@ -440,15 +333,16 @@ th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical
 th { font-weight: bold; }
 .left-align { text-align: left; padding-left: 8px; }
 .bold { font-weight: bold; }
-3. Chi tra ve HTML thuan, khong markdown code block.`;
+3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+
       const result = await callGeminiAI(prompt, apiKey, model);
-      const cleanHtml = stripMarkdownFences(result).trim();
+      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
       setMatrixHtml(cleanHtml);
       setCurrentStep(2);
     } catch (error: any) {
       Swal.fire({
         title: 'Lỗi',
-        text: error.message || 'Không thể tạo ma trận',
+        text: error.message,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
@@ -458,22 +352,93 @@ th { font-weight: bold; }
       setIsGenerating(false);
     }
   };
+
+  const downloadHtml = (html: string, filename: string) => {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadDoc = (html: string, filename: string, landscape: boolean = false) => {
+    // A4: width=11906 twips (210mm), height=16838 twips (297mm)
+    // Landscape: swap w/h and add orient
+    const pgW = landscape ? 16838 : 11906;
+    const pgH = landscape ? 11906 : 16838;
+    const wordSetup = `
+      <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom>
+        <w:Body><w:SectPr>
+          <w:pgSz w:w="${pgW}" w:h="${pgH}" ${landscape ? 'w:orient="landscape"' : ''}/>
+          <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="720" w:footer="720"/>
+        </w:SectPr></w:Body>
+      </w:WordDocument></xml>
+      <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>
+        <w:Body><w:SectPr>
+          <w:pgSz w:w="${pgW}" w:h="${pgH}" ${landscape ? 'w:orient="landscape"' : ''}/>
+          <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="720" w:footer="720"/>
+        </w:SectPr></w:Body>
+      </w:WordDocument></xml><![endif]-->`;
+    const pageStyle = landscape
+      ? `@page { size: A4 landscape; margin: 2cm; } @page Section1 { size: 29.7cm 21cm; mso-page-orientation: landscape; margin: 2cm; }`
+      : `@page { size: A4; margin: 2cm; } @page Section1 { size: 21cm 29.7cm; margin: 2cm; }`;
+    const htmlWithMeta = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'>${wordSetup}<style>${pageStyle} body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid black;padding:5px;vertical-align:middle;}th{font-weight:bold;}</style></head><body>${html}</body></html>`;
+    const blob = new Blob(['\uFEFF', htmlWithMeta], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleUploadMatrix = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.html,.htm,.doc';
+    input.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setMatrixHtml(reader.result as string);
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  };
+
   const handleGenerateSpecs = async () => {
     if (!matrixHtml) return;
     setIsGenerating(true);
     try {
-      const prompt = `Dua tren Ma tran de kiem tra (HTML) da tao, hay tao BANG DAC TA DE KIEM TRA (Full HTML Document).
+      const prompt = `Dựa trên Ma trận đề kiểm tra (HTML) đã tạo, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
 
-MA TRAN DAU VAO:
+MA TRẬN ĐẦU VÀO:
 ${matrixHtml}
 
-YEU CAU:
-1. Tieu de bang: "DAC TA DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()}"
-2. Duoi tieu de: "NAM HOC 20... - 20..."
-3. Cau truc cot khop voi Ma tran, them cot "Yeu cau can dat".
-4. Moi bai hoc co 2 dong (sub-row).
-5. Footer 3 dong: Tong so cau, Tong so diem (=10), Ti le %.
-6. Chi tra ve HTML thuan, khong markdown code block.`;
+YÊU CẦU:
+1. Tiêu đề bảng: "ĐẶC TẢ ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}"
+2. Dưới tiêu đề: "NĂM HỌC 20... - 20..."
+3. CẤU TRÚC CỘT PHẢI KHỚP 100% với Ma trận, thêm cột "Yêu cầu cần đạt"
+4. Mỗi bài học có 2 dòng (sub-row): dòng 1 số lượng câu, dòng 2 mã năng lực (TD/GQVĐ)
+5. Footer 3 dòng: Tổng số câu, Tổng số điểm (=10), Tỉ lệ %
+6. Cột "Yêu cầu cần đạt" ghi chi tiết: Nhận biết, Thông hiểu, Vận dụng
+7. **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm.
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; margin: 20px; }
+h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { font-weight: bold; }
+.left-align, .text-left { text-align: left; padding: 6px 8px; vertical-align: top; }
+.bold { font-weight: bold; }
+
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
@@ -481,7 +446,7 @@ YEU CAU:
       setCurrentStep(3);
     } catch (error: any) {
       Swal.fire({
-        title: 'Loi tao dac ta',
+        title: 'Lỗi tạo đặc tả',
         text: error.message,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
@@ -497,19 +462,40 @@ YEU CAU:
     if (!specsHtml) return;
     setIsGenerating(true);
     try {
-      const prompt = `Dua tren Bang dac ta (HTML) sau, hay soan DE THI HOAN CHINH va HUONG DAN CHAM.
+      const prompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
-BANG DAC TA:
+BẢNG ĐẶC TẢ:
 ${specsHtml}
 
-YEU CAU OUTPUT:
+YÊU CẦU OUTPUT:
 1. Full HTML Document (<!DOCTYPE html>...)
-2. Tieu de: DE KIEM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()}
-3. Thoi gian: ${thoiGian} phut
-4. Co thong tin truong, nam hoc, ho ten, SBD.
-5. Noi dung cau hoi phu hop voi bang dac ta.
-6. Co dap an o cuoi bai, trinh bay theo bang.
-7. Chi tra ve HTML thuan, khong markdown code block.`;
+2. Tiêu đề: ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}
+3. Thời gian: ${thoiGian} phút
+4. Năm học: "NĂM HỌC 20... - 20..." (để trống)
+5. Trường: "TRƯỜNG THPT ..............." (để trống)
+6. Có phần Họ tên, SBD
+7. Nội dung câu hỏi phải phù hợp với bảng đặc tả
+8. Đáp án ở cuối PHẢI trình bày dạng BẢNG, mỗi bảng 10 câu, gồm 2 dòng:
+   - Dòng 1: "Câu" | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+   - Dòng 2: "Đáp án" | A | B | C | D | ... (đáp án tương ứng)
+   - Bảng tiếp theo: Câu 11-20, 21-30, 31-40... cho đến hết
+   - Mỗi bảng cách nhau 1 dòng trống
+   - Style bảng: border 1px solid black, padding 5px, text-align center
+
+Format câu hỏi:
+- Trắc nghiệm: Câu X. Nội dung -> A. B. C. D.
+- Đúng/Sai: Câu X. Đề dẫn -> a) Mệnh đề 1 b) Mệnh đề 2 c) Mệnh đề 3 d) Mệnh đề 4. Mỗi câu có 4 mệnh đề, mỗi mệnh đề Đúng hoặc Sai, mỗi mệnh đề đúng được 0.25 điểm (tổng 1 câu = 1.0 điểm).
+- Trả lời ngắn: Câu X. Nội dung
+- Tự luận: Câu X. Nội dung (nếu có)
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; margin: 20px; }
+h3, h4 { text-align: center; font-weight: bold; margin-top: 20px; }
+.question-number { font-weight: bold; }
+.options { margin-left: 20px; }
+.option-item { margin-bottom: 5px; }
+
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
@@ -517,7 +503,7 @@ YEU CAU OUTPUT:
       setCurrentStep(4);
     } catch (error: any) {
       Swal.fire({
-        title: 'Loi tao de thi',
+        title: 'Lỗi tạo đề thi',
         text: error.message,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
@@ -803,7 +789,7 @@ YEU CAU OUTPUT:
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
-              <Upload size={13} /> Upload Matrix (.html/.doc)
+              <Upload size={13} /> Upload Ma trận
             </button>
             <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
@@ -1152,14 +1138,3 @@ YEU CAU OUTPUT:
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
