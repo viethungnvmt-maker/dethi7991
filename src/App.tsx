@@ -57,6 +57,10 @@ interface ExamStructureRow {
     count: number;
     score: number;
   };
+  vandungcao: {
+    count: number;
+    score: number;
+  };
 }
 
 interface Lesson {
@@ -78,6 +82,7 @@ const STRUCTURE_LEVELS = [
   { key: 'biet', label: 'Biết' },
   { key: 'hieu', label: 'Hiểu' },
   { key: 'vandung', label: 'Vận dụng' },
+  { key: 'vandungcao', label: 'Vận dụng cao' },
 ] as const;
 
 type StructureLevelKey = typeof STRUCTURE_LEVELS[number]['key'];
@@ -91,24 +96,28 @@ const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
     biet: createStructureCell(),
     hieu: createStructureCell(),
     vandung: createStructureCell(),
+    vandungcao: createStructureCell(),
   },
   {
     label: 'Dạng II (Đúng/Sai)',
     biet: createStructureCell(),
     hieu: createStructureCell(),
     vandung: createStructureCell(),
+    vandungcao: createStructureCell(),
   },
   {
     label: 'Dạng III (Trả lời ngắn)',
     biet: createStructureCell(),
     hieu: createStructureCell(),
     vandung: createStructureCell(),
+    vandungcao: createStructureCell(),
   },
   {
     label: 'Tự luận',
     biet: createStructureCell(),
     hieu: createStructureCell(),
     vandung: createStructureCell(),
+    vandungcao: createStructureCell(),
   },
 ];
 
@@ -129,6 +138,11 @@ const calculateTotalPoints = (rows: ExamStructureRow[]) =>
       sum + STRUCTURE_LEVELS.reduce((rowSum, level) => rowSum + row[level.key].count * row[level.key].score, 0),
     0,
   );
+
+const calculateRowTotals = (row: ExamStructureRow) => ({
+  count: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count, 0),
+  score: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count * row[level.key].score, 0),
+});
 
 const isQuarterStep = (value: number) => Math.abs(value * 4 - Math.round(value * 4)) < 1e-9;
 
@@ -376,7 +390,12 @@ export default function App() {
 
       const qc = examStructure;
       // qc[0] = Dạng I (1 lựa chọn), qc[1] = Dạng II (Đúng/Sai), qc[2] = Dạng III (Trả lời ngắn), qc[3] = Tự luận
-      const hasEssay = qc[3] && (qc[3].biet.count + qc[3].hieu.count + qc[3].vandung.count) > 0;
+      const hasEssay = qc[3] && (
+        qc[3].biet.count +
+        qc[3].hieu.count +
+        qc[3].vandung.count +
+        qc[3].vandungcao.count
+      ) > 0;
 
       const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
@@ -398,16 +417,16 @@ Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loai
 Dưới tiêu đề: **NĂM HỌC 20... - 20...** (để trống)
 
 **HEADER BẢNG (4 dòng merge cells):**
-- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=3,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
+- Dòng 1: TT(rowspan=4) | Chương/chủ đề(rowspan=4) | Nội dung/ĐVKT(rowspan=4) | Mức độ đánh giá(colspan=...) | Tổng số câu(colspan=4,rowspan=2) | Tỉ lệ % điểm(rowspan=4)
 - Dòng 2: TNKQ(colspan=...)
-- Dòng 3: 1 lựa chọn(colspan=3) | Đúng-Sai(colspan=3) | Trả lời ngắn(colspan=3) ${hasEssay ? '| Tự luận(colspan=3)' : ''} | Biết | Hiểu | VD
-- Dòng 4: Biết | Hiểu | VD | Biết | Hiểu | VD | Biết | Hiểu | VD ${hasEssay ? '| Biết | Hiểu | VD' : ''}
+- Dòng 3: 1 lựa chọn(colspan=4) | Đúng-Sai(colspan=4) | Trả lời ngắn(colspan=4) ${hasEssay ? '| Tự luận(colspan=4)' : ''} | Biết | Hiểu | VD | VDC
+- Dòng 4: Biết | Hiểu | VD | VDC | Biết | Hiểu | VD | VDC | Biết | Hiểu | VD | VDC ${hasEssay ? '| Biết | Hiểu | VD | VDC' : ''}
 
-${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=3).'}
+${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ tự luận => thêm cột Tự luận (colspan=4).'}
 
 **NỘI DUNG BẢNG - MỖI BÀI HỌC CÓ 2 DÒNG (sub-row):**
 - Dòng 1: Số lượng câu hỏi. Ô "Nội dung" ghi tên bài + (X tiết), dùng rowspan=2
-- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ". Nếu 0 câu thì để trống.
+- Dòng 2: Ô Biết/Hiểu ghi "TD", ô VD ghi "GQVĐ", ô VDC ghi "GQVĐ cao". Nếu 0 câu thì để trống.
 - Merge cells STT & Chương: nếu 1 chương có nhiều bài => rowspan = (số bài × 2)
 
 **FOOTER 3 DÒNG:**
@@ -526,9 +545,9 @@ YÊU CẦU:
 1. Tiêu đề bảng: "ĐẶC TẢ ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}"
 2. Dưới tiêu đề: "NĂM HỌC 20... - 20..."
 3. CẤU TRÚC CỘT PHẢI KHỚP 100% với Ma trận, thêm cột "Yêu cầu cần đạt"
-4. Mỗi bài học có 2 dòng (sub-row): dòng 1 số lượng câu, dòng 2 mã năng lực (TD/GQVĐ)
+4. Mỗi bài học có 2 dòng (sub-row): dòng 1 số lượng câu, dòng 2 mã năng lực (TD/GQVĐ/GQVĐ cao)
 5. Footer 3 dòng: Tổng số câu, Tổng số điểm (=10), Tỉ lệ %
-6. Cột "Yêu cầu cần đạt" ghi chi tiết: Nhận biết, Thông hiểu, Vận dụng
+6. Cột "Yêu cầu cần đạt" ghi chi tiết: Nhận biết, Thông hiểu, Vận dụng, Vận dụng cao
 7. **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm.
 
 Style CSS:
@@ -832,12 +851,15 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         </div>
 
         <div className="space-y-5">
-          {examStructure.map((row, idx) => (
+          {examStructure.map((row, idx) => {
+            const rowTotals = calculateRowTotals(row);
+
+            return (
             <div key={idx} className="flex flex-col xl:flex-row xl:items-start gap-3 sm:gap-4">
               <div className="xl:w-52 shrink-0 pt-1">
                 <span className="text-sm font-medium text-primary">{row.label}</span>
               </div>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
                   <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3">
                     <label className="block text-xs font-semibold text-primary mb-2">{label}</label>
@@ -869,9 +891,26 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                     </div>
                   </div>
                 ))}
+                <div className="rounded-xl border border-primary/30 bg-primary/8 p-3">
+                  <label className="block text-xs font-semibold text-primary mb-2">Tổng</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="block text-[11px] text-slate-400 mb-1">Tổng câu</span>
+                      <div className="input-field text-center px-3 py-2.5 bg-surface-light/70 text-primary font-semibold">
+                        {rowTotals.count}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-slate-400 mb-1">Tổng điểm</span>
+                      <div className="input-field text-center px-3 py-2.5 bg-surface-light/70 text-primary font-semibold">
+                        {formatScore(rowTotals.score)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
 
         <div className="mt-5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 px-4 py-3 rounded-xl border border-border bg-surface-light/40 text-sm">

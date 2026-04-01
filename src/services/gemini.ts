@@ -135,16 +135,20 @@ export async function generateMatrixHTML(
   const ai = createAI(apiKey);
   const model = modelName || getModel();
 
-  const hasEssay = questionConfig.essay.biet + questionConfig.essay.hieu + questionConfig.essay.vandung > 0;
+  const hasEssay =
+    questionConfig.essay.biet +
+    questionConfig.essay.hieu +
+    questionConfig.essay.vandung +
+    (questionConfig.essay.vandungcao || 0) > 0;
 
   const prompt = `Hãy tạo MA TRẬN ĐỀ KIỂM TRA (HTML Table) cho môn ${subject}, khối ${grade}.
 Loại đề: ${examType}, Thời gian: ${duration} phút.
 
 CẤU TRÚC SỐ LƯỢNG CÂU HỎI:
-- 1 lựa chọn (Dạng I): Biết ${questionConfig.type1.biet}, Hiểu ${questionConfig.type1.hieu}, VD ${questionConfig.type1.vandung}
-- Đúng - Sai (Dạng II): Biết ${questionConfig.type2.biet}, Hiểu ${questionConfig.type2.hieu}, VD ${questionConfig.type2.vandung}  
-- Trả lời ngắn (Dạng III): Biết ${questionConfig.type3.biet}, Hiểu ${questionConfig.type3.hieu}, VD ${questionConfig.type3.vandung}
-- Tự luận: Biết ${questionConfig.essay.biet}, Hiểu ${questionConfig.essay.hieu}, VD ${questionConfig.essay.vandung}
+- 1 lựa chọn (Dạng I): Biết ${questionConfig.type1.biet}, Hiểu ${questionConfig.type1.hieu}, VD ${questionConfig.type1.vandung}, VDC ${questionConfig.type1.vandungcao || 0}
+- Đúng - Sai (Dạng II): Biết ${questionConfig.type2.biet}, Hiểu ${questionConfig.type2.hieu}, VD ${questionConfig.type2.vandung}, VDC ${questionConfig.type2.vandungcao || 0}  
+- Trả lời ngắn (Dạng III): Biết ${questionConfig.type3.biet}, Hiểu ${questionConfig.type3.hieu}, VD ${questionConfig.type3.vandung}, VDC ${questionConfig.type3.vandungcao || 0}
+- Tự luận: Biết ${questionConfig.essay.biet}, Hiểu ${questionConfig.essay.hieu}, VD ${questionConfig.essay.vandung}, VDC ${questionConfig.essay.vandungcao || 0}
 
 DỮ LIỆU ĐẦU VÀO:
 ${JSON.stringify(selectedTopics, null, 2)}

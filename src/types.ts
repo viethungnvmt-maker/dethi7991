@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type CognitiveLevel = 'Biết' | 'Hiểu' | 'Vận dụng';
+export type CognitiveLevel = 'Biết' | 'Hiểu' | 'Vận dụng' | 'Vận dụng cao';
 
 export interface Subject {
   id: string;
