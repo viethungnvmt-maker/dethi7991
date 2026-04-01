@@ -44,6 +44,14 @@
   -moz-appearance: textfield;
 }
 
+.number-cell {
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
 .section-number {
   @apply w-7 h-7 rounded-full border-2 border-primary text-primary
     flex items-center justify-center text-sm font-bold shrink-0;

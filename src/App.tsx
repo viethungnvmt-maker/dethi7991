@@ -870,35 +870,35 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             const rowTotals = calculateRowTotals(row);
 
             return (
-            <div key={idx} className="flex flex-col xl:grid xl:grid-cols-[6.5rem_minmax(0,1fr)] xl:items-start gap-3 sm:gap-4">
+            <div key={idx} className="flex flex-col xl:grid xl:grid-cols-[4.75rem_minmax(0,1fr)] xl:items-start gap-3 xl:gap-2.5">
               <div className="shrink-0 pt-1">
                 {renderStructureLabel(row.label)}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 xl:gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 xl:gap-2.5">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
-                  <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-4">
-                    <label className="block text-sm font-semibold text-primary mb-3">{label}</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
+                  <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3.5">
+                    <label className="block text-sm font-semibold text-primary mb-2.5">{label}</label>
+                    <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2">
+                      <div className="min-w-0">
                         <span className="block text-xs text-slate-400 mb-1.5">Số câu</span>
                         <input
                           type="number"
                           value={row[key].count}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateStructure(idx, key, 'count', e.target.value === '' ? 0 : Number(e.target.value))}
-                          className="input-field text-center text-lg font-semibold px-3 py-3.5 min-h-14"
+                          className="input-field number-cell text-center px-2 py-3 min-h-12"
                           min={0}
                           step={1}
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <span className="block text-xs text-slate-400 mb-1.5">Điểm/câu</span>
                         <input
                           type="number"
                           value={row[key].score}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateStructure(idx, key, 'score', e.target.value === '' ? 0 : Number(e.target.value))}
-                          className="input-field text-center text-lg font-semibold px-3 py-3.5 min-h-14"
+                          className="input-field number-cell text-center px-2 py-3 min-h-12"
                           min={0}
                           step={0.25}
                         />
@@ -906,18 +906,18 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                     </div>
                   </div>
                 ))}
-                <div className="rounded-xl border border-primary/30 bg-primary/8 p-4">
-                  <label className="block text-sm font-semibold text-primary mb-3">Tổng</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
+                <div className="rounded-xl border border-primary/30 bg-primary/8 p-3.5">
+                  <label className="block text-sm font-semibold text-primary mb-2.5">Tổng</label>
+                  <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2">
+                    <div className="min-w-0">
                       <span className="block text-xs text-slate-400 mb-1.5">Tổng câu</span>
-                      <div className="input-field text-center text-lg font-semibold px-3 py-3.5 min-h-14 bg-surface-light/70 text-primary">
+                      <div className="input-field number-cell text-center px-2 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
                         {rowTotals.count}
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="block text-xs text-slate-400 mb-1.5">Tổng điểm</span>
-                      <div className="input-field text-center text-lg font-semibold px-3 py-3.5 min-h-14 bg-surface-light/70 text-primary">
+                      <div className="input-field number-cell text-center px-2 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
                         {formatScore(rowTotals.score)}
                       </div>
                     </div>
