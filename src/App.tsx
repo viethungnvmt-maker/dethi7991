@@ -279,10 +279,10 @@ const extractHtmlDocumentFromResponse = (responseText: string) => {
 };
 
 const HTML_LIKE_DOCUMENT_REGEX = /<(?:!doctype|html|body|table|div|section|main)\b/i;
-const MAX_PREVIEW_SOURCE_LENGTH = 120_000;
-const MAX_PREVIEW_MARKUP_LENGTH = 60_000;
-const MAX_PREVIEW_TEXT_LENGTH = 20_000;
-const MAX_PREVIEW_NODE_COUNT = 1800;
+const MAX_PREVIEW_SOURCE_LENGTH = 40_000;
+const MAX_PREVIEW_MARKUP_LENGTH = 18_000;
+const MAX_PREVIEW_TEXT_LENGTH = 8_000;
+const MAX_PREVIEW_NODE_COUNT = 600;
 const PREVIEW_ALLOWED_TAGS = new Set([
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -355,7 +355,7 @@ const serializePreviewNode = (node: Node, budget: { remaining: number }): string
   return `<${tag}${attrText}>${childMarkup}</${tag}>`;
 };
 
-const buildSafePreviewHtml = (rawContent: string, title: string) => {
+const buildSafePreviewImageUrl = (rawContent: string, title: string) => {
   if (!rawContent) return '';
 
   const prepared = prepareImportedHtmlDocument(rawContent);
@@ -383,25 +383,29 @@ const buildSafePreviewHtml = (rawContent: string, title: string) => {
     ? '<div class="preview-note">Bản xem trước đã được rút gọn để tránh lỗi bộ nhớ.</div>'
     : '';
 
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8" />
+  const previewWidth = 1200;
+  const estimatedHeight = 1700;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${previewWidth}" height="${estimatedHeight}" viewBox="0 0 ${previewWidth} ${estimatedHeight}">
   <title>${escapeHtml(title)}</title>
   <style>
-    body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; margin: 20px; background: #fff; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-    th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
-    h1, h2, h3, h4, h5 { text-align: center; margin: 12px 0; }
-    pre { white-space: pre-wrap; word-break: break-word; font-family: "Times New Roman", serif; }
-    .preview-note { margin-bottom: 12px; padding: 8px 10px; border: 1px solid #999; background: #f3f4f6; font-size: 11pt; }
+    .page { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; background: #fff; width: ${previewWidth}px; height: ${estimatedHeight}px; box-sizing: border-box; padding: 20px; overflow: hidden; }
+    .page table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    .page th, .page td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
+    .page h1, .page h2, .page h3, .page h4, .page h5, .page h6 { text-align: center; margin: 12px 0; }
+    .page pre { white-space: pre-wrap; word-break: break-word; font-family: "Times New Roman", serif; }
+    .page .preview-note { margin-bottom: 12px; padding: 8px 10px; border: 1px solid #999; background: #f3f4f6; font-size: 11pt; }
   </style>
-</head>
-<body>
-  ${previewNotice}
-  ${bodyMarkup}
-</body>
-</html>`;
+  <rect x="0" y="0" width="${previewWidth}" height="${estimatedHeight}" fill="#ffffff" />
+  <foreignObject x="0" y="0" width="${previewWidth}" height="${estimatedHeight}">
+    <div xmlns="http://www.w3.org/1999/xhtml" class="page">
+      ${previewNotice}
+      ${bodyMarkup}
+    </div>
+  </foreignObject>
+</svg>`;
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
 const waitForNextPaint = () =>
@@ -585,16 +589,16 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
   const totalConfiguredPoints = calculateTotalPoints(examStructure);
-  const matrixPreviewHtml = useMemo(
-    () => (matrixHtml ? buildSafePreviewHtml(matrixHtml, 'Ma trận đề thi') : ''),
+  const matrixPreviewImageUrl = useMemo(
+    () => (matrixHtml ? buildSafePreviewImageUrl(matrixHtml, 'Ma trận đề thi') : ''),
     [matrixHtml],
   );
-  const specsPreviewHtml = useMemo(
-    () => (specsHtml ? buildSafePreviewHtml(specsHtml, 'Bảng đặc tả') : ''),
+  const specsPreviewImageUrl = useMemo(
+    () => (specsHtml ? buildSafePreviewImageUrl(specsHtml, 'Bảng đặc tả') : ''),
     [specsHtml],
   );
-  const examPreviewHtml = useMemo(
-    () => (examHtml ? buildSafePreviewHtml(examHtml, 'Đề thi hoàn chỉnh') : ''),
+  const examPreviewImageUrl = useMemo(
+    () => (examHtml ? buildSafePreviewImageUrl(examHtml, 'Đề thi hoàn chỉnh') : ''),
     [examHtml],
   );
 
@@ -1566,13 +1570,19 @@ LẦN THỬ ${attempt}:
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              <iframe
-                srcDoc={matrixPreviewHtml}
-                className="w-full h-full"
-                title="Matrix Preview"
-                loading="lazy"
-                sandbox=""
-              />
+              {matrixPreviewImageUrl ? (
+                <img
+                  src={matrixPreviewImageUrl}
+                  alt="Matrix Preview"
+                  className="block w-full h-auto align-top"
+                  loading="lazy"
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                  Khong the tao anh xem truoc cho ma tran.
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1630,13 +1640,19 @@ LẦN THỬ ${attempt}:
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              <iframe
-                srcDoc={specsPreviewHtml}
-                className="w-full h-full"
-                title="Specs Preview"
-                loading="lazy"
-                sandbox=""
-              />
+              {specsPreviewImageUrl ? (
+                <img
+                  src={specsPreviewImageUrl}
+                  alt="Specs Preview"
+                  className="block w-full h-auto align-top"
+                  loading="lazy"
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                  Khong the tao anh xem truoc cho bang dac ta.
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1679,13 +1695,19 @@ LẦN THỬ ${attempt}:
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              <iframe
-                srcDoc={examPreviewHtml}
-                className="w-full h-full"
-                title="Exam Preview"
-                loading="lazy"
-                sandbox=""
-              />
+              {examPreviewImageUrl ? (
+                <img
+                  src={examPreviewImageUrl}
+                  alt="Exam Preview"
+                  className="block w-full h-auto align-top"
+                  loading="lazy"
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                  Khong the tao anh xem truoc cho de thi.
+                </div>
+              )}
             </div>
           </div>
         ) : (
