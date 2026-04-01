@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Settings,
   Upload,
@@ -404,6 +404,16 @@ const buildSafePreviewHtml = (rawContent: string, title: string) => {
 </html>`;
 };
 
+const waitForNextPaint = () =>
+  new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+
+    setTimeout(resolve, 0);
+  });
+
 const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
   const ranges = buildExamQuestionRanges(rows);
 
@@ -575,9 +585,18 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
   const totalConfiguredPoints = calculateTotalPoints(examStructure);
-  const matrixPreviewHtml = matrixHtml ? buildSafePreviewHtml(matrixHtml, 'Ma trận đề thi') : '';
-  const specsPreviewHtml = specsHtml ? buildSafePreviewHtml(specsHtml, 'Bảng đặc tả') : '';
-  const examPreviewHtml = examHtml ? buildSafePreviewHtml(examHtml, 'Đề thi hoàn chỉnh') : '';
+  const matrixPreviewHtml = useMemo(
+    () => (matrixHtml ? buildSafePreviewHtml(matrixHtml, 'Ma trận đề thi') : ''),
+    [matrixHtml],
+  );
+  const specsPreviewHtml = useMemo(
+    () => (specsHtml ? buildSafePreviewHtml(specsHtml, 'Bảng đặc tả') : ''),
+    [specsHtml],
+  );
+  const examPreviewHtml = useMemo(
+    () => (examHtml ? buildSafePreviewHtml(examHtml, 'Đề thi hoàn chỉnh') : ''),
+    [examHtml],
+  );
 
   useEffect(() => {
     localStorage.setItem('gemini_api_key', apiKey);
@@ -780,6 +799,7 @@ export default function App() {
       return;
     }
     setIsGenerating(true);
+    await waitForNextPaint();
     try {
       // Build selected topics data
       const selectedTopics: any[] = [];
@@ -998,6 +1018,7 @@ th { font-weight: bold; }
   const handleGenerateSpecs = async () => {
     if (!matrixHtml) return;
     setIsGenerating(true);
+    await waitForNextPaint();
     try {
       const prompt = `Dựa trên Ma trận đề kiểm tra (HTML) đã tạo, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
 
@@ -1045,6 +1066,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
   const handleGenerateExam = async () => {
     if (!specsHtml) return;
     setIsGenerating(true);
+    await waitForNextPaint();
     try {
       const configuredQuestionCount = totalConfiguredQuestions;
       const fallbackQuestionCount = Math.max(
