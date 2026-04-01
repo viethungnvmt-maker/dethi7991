@@ -870,11 +870,11 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             const rowTotals = calculateRowTotals(row);
 
             return (
-            <div key={idx} className="flex flex-col xl:flex-row xl:items-start gap-3 sm:gap-4">
-              <div className="xl:w-44 shrink-0 pt-1">
+            <div key={idx} className="flex flex-col xl:grid xl:grid-cols-[6.5rem_minmax(0,1fr)] xl:items-start gap-3 sm:gap-4">
+              <div className="shrink-0 pt-1">
                 {renderStructureLabel(row.label)}
               </div>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 xl:gap-3">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
                   <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-4">
                     <label className="block text-sm font-semibold text-primary mb-3">{label}</label>

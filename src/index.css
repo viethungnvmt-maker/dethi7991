@@ -34,6 +34,16 @@
   @apply bg-surface text-slate-200;
 }
 
+.input-field[type="number"]::-webkit-outer-spin-button,
+.input-field[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.input-field[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .section-number {
   @apply w-7 h-7 rounded-full border-2 border-primary text-primary
     flex items-center justify-center text-sm font-bold shrink-0;
