@@ -890,9 +890,9 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               </div>
               <div className="grid w-full grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.18fr)] gap-3 xl:gap-1.5">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
-                  <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3.5">
+                  <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3.5 overflow-hidden">
                     <label className="block text-sm font-semibold text-primary mb-2.5">{label}</label>
-                    <div className="grid grid-cols-[minmax(3.15rem,0.64fr)_minmax(5.5rem,1.36fr)] gap-2">
+                    <div className="grid grid-cols-[minmax(0,0.58fr)_minmax(0,1fr)] gap-1.5">
                       <div className="min-w-0">
                         <span className="metric-caption">Số câu</span>
                         <input
@@ -920,9 +920,9 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                     </div>
                   </div>
                 ))}
-                <div className="rounded-xl border border-primary/30 bg-primary/8 p-3.5">
+                <div className="rounded-xl border border-primary/30 bg-primary/8 p-3.5 overflow-hidden">
                   <label className="block text-sm font-semibold text-primary mb-2.5">Tổng</label>
-                  <div className="grid grid-cols-[minmax(3.15rem,0.64fr)_minmax(5.5rem,1.36fr)] gap-2">
+                  <div className="grid grid-cols-[minmax(0,0.58fr)_minmax(0,1fr)] gap-1.5">
                     <div className="min-w-0">
                       <span className="metric-caption">Tổng câu</span>
                       <div className="input-field number-cell text-center px-1.5 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
