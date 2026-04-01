@@ -279,6 +279,8 @@ const extractHtmlDocumentFromResponse = (responseText: string) => {
 };
 
 const HTML_LIKE_DOCUMENT_REGEX = /<(?:!doctype|html|body|table|div|section|main)\b/i;
+const MAX_PREVIEW_SOURCE_LENGTH = 600_000;
+const MAX_PREVIEW_MARKUP_LENGTH = 180_000;
 
 const prepareImportedHtmlDocument = (rawContent: string) => {
   const extracted = extractHtmlDocumentFromResponse(rawContent);
@@ -288,6 +290,62 @@ const prepareImportedHtmlDocument = (rawContent: string) => {
     .replace(/<\?xml[\s\S]*?\?>/gi, '')
     .replace(/<xml[\s\S]*?<\/xml>/gi, '')
     .trim();
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const buildSafePreviewHtml = (rawContent: string, title: string) => {
+  if (!rawContent) return '';
+
+  const prepared = prepareImportedHtmlDocument(rawContent);
+  const limitedSource = prepared.slice(0, MAX_PREVIEW_SOURCE_LENGTH);
+  const sourceWasTrimmed = prepared.length > MAX_PREVIEW_SOURCE_LENGTH;
+
+  let bodyMarkup = '';
+
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(limitedSource, 'text/html');
+    doc.querySelectorAll('script, style, link, meta, title, iframe, object, embed, svg, canvas').forEach((node) => node.remove());
+    bodyMarkup = (doc.body?.innerHTML || '').trim();
+  }
+
+  if (!bodyMarkup) {
+    bodyMarkup = `<pre>${escapeHtml(htmlToPlainText(limitedSource).slice(0, 20000))}</pre>`;
+  }
+
+  if (bodyMarkup.length > MAX_PREVIEW_MARKUP_LENGTH) {
+    bodyMarkup = `<pre>${escapeHtml(htmlToPlainText(bodyMarkup).slice(0, 20000))}</pre>`;
+  }
+
+  const previewNotice = sourceWasTrimmed
+    ? '<div class="preview-note">Bản xem trước đã được rút gọn để tránh lỗi bộ nhớ.</div>'
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; margin: 20px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
+    h1, h2, h3, h4, h5 { text-align: center; margin: 12px 0; }
+    pre { white-space: pre-wrap; word-break: break-word; font-family: "Times New Roman", serif; }
+    .preview-note { margin-bottom: 12px; padding: 8px 10px; border: 1px solid #999; background: #f3f4f6; font-size: 11pt; }
+  </style>
+</head>
+<body>
+  ${previewNotice}
+  ${bodyMarkup}
+</body>
+</html>`;
 };
 
 const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
@@ -461,6 +519,9 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
   const totalConfiguredPoints = calculateTotalPoints(examStructure);
+  const matrixPreviewHtml = matrixHtml ? buildSafePreviewHtml(matrixHtml, 'Ma trận đề thi') : '';
+  const specsPreviewHtml = specsHtml ? buildSafePreviewHtml(specsHtml, 'Bảng đặc tả') : '';
+  const examPreviewHtml = examHtml ? buildSafePreviewHtml(examHtml, 'Đề thi hoàn chỉnh') : '';
 
   useEffect(() => {
     localStorage.setItem('gemini_api_key', apiKey);
@@ -1414,10 +1475,11 @@ LẦN THỬ ${attempt}:
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
               <iframe
-                srcDoc={matrixHtml}
+                srcDoc={matrixPreviewHtml}
                 className="w-full h-full"
                 title="Matrix Preview"
-                sandbox="allow-same-origin"
+                loading="lazy"
+                sandbox=""
               />
             </div>
           </div>
@@ -1477,10 +1539,11 @@ LẦN THỬ ${attempt}:
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
               <iframe
-                srcDoc={specsHtml}
+                srcDoc={specsPreviewHtml}
                 className="w-full h-full"
                 title="Specs Preview"
-                sandbox="allow-same-origin"
+                loading="lazy"
+                sandbox=""
               />
             </div>
           </div>
@@ -1525,10 +1588,11 @@ LẦN THỬ ${attempt}:
             </div>
             <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
               <iframe
-                srcDoc={examHtml}
+                srcDoc={examPreviewHtml}
                 className="w-full h-full"
                 title="Exam Preview"
-                sandbox="allow-same-origin"
+                loading="lazy"
+                sandbox=""
               />
             </div>
           </div>
