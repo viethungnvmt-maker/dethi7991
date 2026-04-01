@@ -279,16 +279,13 @@ const extractHtmlDocumentFromResponse = (responseText: string) => {
 };
 
 const HTML_LIKE_DOCUMENT_REGEX = /<(?:!doctype|html|body|table|div|section|main)\b/i;
-const MAX_PREVIEW_SOURCE_LENGTH = 40_000;
-const MAX_PREVIEW_MARKUP_LENGTH = 18_000;
-const MAX_PREVIEW_TEXT_LENGTH = 8_000;
-const MAX_PREVIEW_NODE_COUNT = 600;
-const PREVIEW_ALLOWED_TAGS = new Set([
-  'table', 'thead', 'tbody', 'tr', 'th', 'td',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'div', 'span', 'br', 'strong', 'b', 'em', 'i', 'u',
-  'ul', 'ol', 'li',
-]);
+const MAX_PREVIEW_SOURCE_LENGTH = 24_000;
+const MAX_PREVIEW_TEXT_LENGTH = 6_000;
+const PREVIEW_IMAGE_WIDTH = 1200;
+const PREVIEW_IMAGE_HEIGHT = 1700;
+const PREVIEW_LINE_HEIGHT = 24;
+const PREVIEW_MAX_LINES = 58;
+const PREVIEW_MAX_CHARS_PER_LINE = 82;
 
 const prepareImportedHtmlDocument = (rawContent: string) => {
   const extracted = extractHtmlDocumentFromResponse(rawContent);
@@ -314,46 +311,53 @@ const sanitizePreviewText = (value: string) =>
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n');
 
-const buildPlainTextPreview = (value: string) =>
-  `<pre>${escapeHtml(sanitizePreviewText(htmlToPlainText(value).slice(0, MAX_PREVIEW_TEXT_LENGTH)))}</pre>`;
+const wrapPreviewText = (value: string, maxCharsPerLine: number) => {
+  const lines: string[] = [];
+  const paragraphs = sanitizePreviewText(value).replace(/\r/g, '').split('\n');
 
-const serializePreviewNode = (node: Node, budget: { remaining: number }): string => {
-  if (budget.remaining <= 0) return '';
+  for (const paragraph of paragraphs) {
+    const trimmedParagraph = paragraph.trim();
 
-  if (node.nodeType === Node.TEXT_NODE) {
-    const text = sanitizePreviewText(node.textContent || '');
-    return text ? escapeHtml(text) : '';
+    if (!trimmedParagraph) {
+      if (lines[lines.length - 1] !== '') {
+        lines.push('');
+      }
+      continue;
+    }
+
+    const words = trimmedParagraph.split(/\s+/).filter(Boolean);
+    let currentLine = '';
+
+    for (const word of words) {
+      if (word.length > maxCharsPerLine) {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = '';
+        }
+
+        for (let index = 0; index < word.length; index += maxCharsPerLine) {
+          lines.push(word.slice(index, index + maxCharsPerLine));
+        }
+        continue;
+      }
+
+      const nextLine = currentLine ? `${currentLine} ${word}` : word;
+      if (nextLine.length > maxCharsPerLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = nextLine;
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
   }
 
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return '';
-  }
-
-  budget.remaining -= 1;
-  const element = node as HTMLElement;
-  const tag = element.tagName.toLowerCase();
-
-  if (!PREVIEW_ALLOWED_TAGS.has(tag)) {
-    return Array.from(element.childNodes).map((child) => serializePreviewNode(child, budget)).join('');
-  }
-
-  const childMarkup = Array.from(element.childNodes).map((child) => serializePreviewNode(child, budget)).join('');
-
-  if (tag === 'br') {
-    return '<br />';
-  }
-
-  const attrs: string[] = [];
-  if ((tag === 'td' || tag === 'th') && element.getAttribute('colspan')) {
-    attrs.push(`colspan="${escapeHtml(element.getAttribute('colspan') || '1')}"`);
-  }
-  if ((tag === 'td' || tag === 'th') && element.getAttribute('rowspan')) {
-    attrs.push(`rowspan="${escapeHtml(element.getAttribute('rowspan') || '1')}"`);
-  }
-
-  const attrText = attrs.length > 0 ? ` ${attrs.join(' ')}` : '';
-  return `<${tag}${attrText}>${childMarkup}</${tag}>`;
+  return lines;
 };
+
 
 const buildSafePreviewImageUrl = (rawContent: string, title: string) => {
   if (!rawContent) return '';
@@ -362,47 +366,38 @@ const buildSafePreviewImageUrl = (rawContent: string, title: string) => {
   const limitedSource = prepared.slice(0, MAX_PREVIEW_SOURCE_LENGTH);
   const sourceWasTrimmed = prepared.length > MAX_PREVIEW_SOURCE_LENGTH;
 
-  let bodyMarkup = sourceWasTrimmed ? buildPlainTextPreview(limitedSource) : '';
+  const previewText = sanitizePreviewText(htmlToPlainText(limitedSource)).slice(0, MAX_PREVIEW_TEXT_LENGTH);
+  const textLines = wrapPreviewText(previewText, PREVIEW_MAX_CHARS_PER_LINE);
+  const contentLines = textLines.slice(0, PREVIEW_MAX_LINES - (sourceWasTrimmed ? 4 : 2));
+  const pageX = 40;
+  const pageY = 32;
+  const pageWidth = PREVIEW_IMAGE_WIDTH - 80;
+  const pageHeight = PREVIEW_IMAGE_HEIGHT - 64;
+  const contentStartY = pageY + 120;
 
-  if (!bodyMarkup && typeof DOMParser !== 'undefined') {
-    const doc = new DOMParser().parseFromString(limitedSource, 'text/html');
-    doc.querySelectorAll('script, style, link, meta, title, iframe, object, embed, svg, canvas, img, video, audio, source').forEach((node) => node.remove());
-    const budget = { remaining: MAX_PREVIEW_NODE_COUNT };
-    bodyMarkup = Array.from(doc.body?.childNodes || []).map((node) => serializePreviewNode(node, budget)).join('').trim();
-  }
 
-  if (!bodyMarkup) {
-    bodyMarkup = buildPlainTextPreview(limitedSource);
-  }
-
-  if (bodyMarkup.length > MAX_PREVIEW_MARKUP_LENGTH) {
-    bodyMarkup = buildPlainTextPreview(bodyMarkup);
-  }
 
   const previewNotice = sourceWasTrimmed
     ? '<div class="preview-note">Bản xem trước đã được rút gọn để tránh lỗi bộ nhớ.</div>'
     : '';
 
-  const previewWidth = 1200;
-  const estimatedHeight = 1700;
+  const contentMarkup = contentLines.map((line, index) => {
+    const y = contentStartY + index * PREVIEW_LINE_HEIGHT;
+    return `<text x="${pageX + 34}" y="${y}" font-family="Times New Roman, serif" font-size="13pt" fill="#111827">${escapeHtml(line || ' ')}</text>`;
+  }).join('');
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${previewWidth}" height="${estimatedHeight}" viewBox="0 0 ${previewWidth} ${estimatedHeight}">
+  const trimNoticeMarkup = sourceWasTrimmed
+    ? `<text x="${pageX + 34}" y="${pageY + 84}" font-family="Arial, sans-serif" font-size="11pt" fill="#9a3412">Ban xem truoc da duoc rut gon de tranh loi bo nho.</text>`
+    : '';
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PREVIEW_IMAGE_WIDTH}" height="${PREVIEW_IMAGE_HEIGHT}" viewBox="0 0 ${PREVIEW_IMAGE_WIDTH} ${PREVIEW_IMAGE_HEIGHT}">
   <title>${escapeHtml(title)}</title>
-  <style>
-    .page { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; background: #fff; width: ${previewWidth}px; height: ${estimatedHeight}px; box-sizing: border-box; padding: 20px; overflow: hidden; }
-    .page table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-    .page th, .page td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
-    .page h1, .page h2, .page h3, .page h4, .page h5, .page h6 { text-align: center; margin: 12px 0; }
-    .page pre { white-space: pre-wrap; word-break: break-word; font-family: "Times New Roman", serif; }
-    .page .preview-note { margin-bottom: 12px; padding: 8px 10px; border: 1px solid #999; background: #f3f4f6; font-size: 11pt; }
-  </style>
-  <rect x="0" y="0" width="${previewWidth}" height="${estimatedHeight}" fill="#ffffff" />
-  <foreignObject x="0" y="0" width="${previewWidth}" height="${estimatedHeight}">
-    <div xmlns="http://www.w3.org/1999/xhtml" class="page">
-      ${previewNotice}
-      ${bodyMarkup}
-    </div>
-  </foreignObject>
+  <rect x="0" y="0" width="${PREVIEW_IMAGE_WIDTH}" height="${PREVIEW_IMAGE_HEIGHT}" fill="#e5e7eb" />
+  <rect x="${pageX}" y="${pageY}" width="${pageWidth}" height="${pageHeight}" rx="18" fill="#ffffff" stroke="#cbd5e1" />
+  <text x="${PREVIEW_IMAGE_WIDTH / 2}" y="${pageY + 48}" text-anchor="middle" font-family="Arial, sans-serif" font-size="18pt" font-weight="700" fill="#111827">${escapeHtml(title)}</text>
+  ${trimNoticeMarkup}
+  <line x1="${pageX + 32}" y1="${pageY + 96}" x2="${pageX + pageWidth - 32}" y2="${pageY + 96}" stroke="#e5e7eb" stroke-width="1" />
+  ${contentMarkup}
 </svg>`;
 
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
