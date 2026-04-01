@@ -77,6 +77,11 @@ interface Chapter {
   lessons: Lesson[];
 }
 
+interface SelectedLessonSummary {
+  chapterName: string;
+  lessonName: string;
+}
+
 const STRUCTURE_LEVELS = [
   { key: 'biet', label: 'Biết' },
   { key: 'hieu', label: 'Hiểu' },
@@ -192,8 +197,27 @@ const buildExamQuestionRanges = (rows: ExamStructureRow[]) => {
   });
 };
 
+const htmlToPlainText = (html: string) => {
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return (doc.body.textContent || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 const countQuestionsInGeneratedExam = (html: string) => {
-  const matches = [...html.matchAll(/Câu\s*(\d+)/gi)];
+  const plainText = htmlToPlainText(html);
+  const matches = [...plainText.matchAll(/\bCâu\s*(\d+)\b/gi)];
   return new Set(matches.map((match) => Number(match[1]))).size;
 };
 
@@ -203,6 +227,118 @@ const describeRowConfig = (row: ExamStructureRow) =>
   STRUCTURE_LEVELS.map(
     ({ key, label }) => `${label} ${row[key].count} câu x ${formatScore(row[key].score)} điểm/câu`,
   ).join(', ');
+
+const sanitizeGeneratedHtml = (html: string) =>
+  html.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
+
+const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
+  const ranges = buildExamQuestionRanges(rows);
+
+  return rows.map((row, index) => {
+    const range = ranges[index];
+    const total = calculateRowTotals(row).count;
+
+    if (total === 0) {
+      return `- ${row.label}: 0 câu, phải bỏ hoàn toàn dạng này khỏi đề.`;
+    }
+
+    return `- ${row.label}: ${total} câu, đánh số từ Câu ${range.start} đến Câu ${range.end}. Chi tiết mức độ: ${describeRowConfig(row)}.`;
+  }).join('\n');
+};
+
+const buildQuestionChecklist = (totalQuestions: number) =>
+  Array.from({ length: totalQuestions }, (_, index) => `Câu ${index + 1}`).join(', ');
+
+const EXAM_PROMPT_TYPE_LABELS = [
+  'Trac nghiem 1 dap an dung',
+  'Trac nghiem dung/sai',
+  'Tra loi ngan',
+  'Tu luan',
+] as const;
+
+const EXAM_PROMPT_LEVEL_LABELS = [
+  'biet',
+  'hieu',
+  'van dung',
+  'van dung cao',
+] as const;
+
+const normalizeTextForMatch = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+const extractIntegerFromCell = (value: string) => {
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : 0;
+};
+
+const buildLessonBreakdownFromMatrix = (
+  matrixHtml: string,
+  selectedLessonItems: SelectedLessonSummary[],
+  includeEssay: boolean,
+) => {
+  if (!matrixHtml || selectedLessonItems.length === 0 || typeof DOMParser === 'undefined') {
+    return '';
+  }
+
+  const doc = new DOMParser().parseFromString(matrixHtml, 'text/html');
+  const rows = Array.from(doc.querySelectorAll('tr'));
+  const groupLabels = includeEssay ? EXAM_PROMPT_TYPE_LABELS : EXAM_PROMPT_TYPE_LABELS.slice(0, 3);
+  const requiredValueCells = groupLabels.length * STRUCTURE_LEVELS.length;
+  const lessonLines: string[] = [];
+  let lessonCursor = 0;
+
+  rows.forEach((row) => {
+    if (lessonCursor >= selectedLessonItems.length) return;
+
+    const cellTexts = Array.from(row.querySelectorAll('td,th'))
+      .map((cell) => (cell.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+
+    if (cellTexts.length === 0) return;
+
+    const rowText = normalizeTextForMatch(cellTexts.join(' '));
+    const currentLesson = selectedLessonItems[lessonCursor];
+    const normalizedLessonName = normalizeTextForMatch(currentLesson.lessonName);
+
+    if (!rowText.includes(normalizedLessonName)) return;
+
+    const lessonCellIndex = cellTexts.findIndex((cellText) =>
+      normalizeTextForMatch(cellText).includes(normalizedLessonName),
+    );
+
+    if (lessonCellIndex === -1) return;
+
+    const valueCells = cellTexts.slice(lessonCellIndex + 1, lessonCellIndex + 1 + requiredValueCells);
+    if (valueCells.length < requiredValueCells) return;
+
+    const summaryParts = groupLabels.map((groupLabel, groupIndex) => {
+      const levelCells = valueCells.slice(
+        groupIndex * STRUCTURE_LEVELS.length,
+        (groupIndex + 1) * STRUCTURE_LEVELS.length,
+      );
+
+      const levelParts = EXAM_PROMPT_LEVEL_LABELS.map((levelLabel, levelIndex) => {
+        const count = extractIntegerFromCell(levelCells[levelIndex] || '');
+        return count > 0 ? `${count} cau ${levelLabel}` : '';
+      }).filter(Boolean);
+
+      return levelParts.length > 0 ? `${groupLabel}: ${levelParts.join(', ')}` : '';
+    }).filter(Boolean);
+
+    if (summaryParts.length > 0) {
+      lessonLines.push(`- ${currentLesson.lessonName}: ${summaryParts.join('; ')}.`);
+    }
+
+    lessonCursor += 1;
+  });
+
+  return lessonLines.join('\n');
+};
 
 const renderStructureLabel = (label: string) => {
   const match = label.match(/^(.*?)(\s*\(.+\))$/);
@@ -627,6 +763,23 @@ th { font-weight: bold; }
     input.click();
   };
 
+  const handleUploadSpecs = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.html,.htm,.doc';
+    input.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setSpecsHtml(reader.result as string);
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  };
+
   const handleGenerateSpecs = async () => {
     if (!matrixHtml) return;
     setIsGenerating(true);
@@ -681,8 +834,17 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const examQuestionRanges = buildExamQuestionRanges(examStructure);
       const compactSpecsHtml = compactHtmlForPrompt(specsHtml);
       const activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
+      const selectedLessonItems: SelectedLessonSummary[] = chapters.flatMap((chapter) =>
+        chapter.lessons
+          .filter((lesson) => selectedLessons.has(lesson.id))
+          .map((lesson) => ({ chapterName: chapter.name, lessonName: lesson.name })),
+      );
+      const includeEssay = calculateRowTotals(examStructure[3]).count > 0;
+      const examTypeRequirements = buildExamTypeRequirements(examStructure);
+      const questionChecklist = buildQuestionChecklist(totalConfiguredQuestions);
+      const lessonBreakdownPrompt = buildLessonBreakdownFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
 
-      const prompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
+      const basePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
 BẢNG ĐẶC TẢ:
 ${compactSpecsHtml}
@@ -691,12 +853,29 @@ CẤU TRÚC SỐ CÂU BẮT BUỘC PHẢI KHỚP 100%:
 - Tổng số câu toàn đề: ${totalConfiguredQuestions}
 ${activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')}
 
+PHÂN BỔ CHI TIẾT TỪNG DẠNG:
+${examTypeRequirements}
+
+${lessonBreakdownPrompt ? `LESSON-BY-LESSON REQUIREMENTS:
+${lessonBreakdownPrompt}
+
+If a lesson is not listed above, do not create any question from that lesson.
+` : ''}
+
+${lessonBreakdownPrompt ? `PHÃ‚N Bá»” CHI TIáº¾T THEO Tá»ªNG BÃ€I (pháº£i bÃ¡m sÃ¡t tá»«ng dÃ²ng):
+${lessonBreakdownPrompt}
+
+Náº¿u má»™t bÃ i khÃ´ng xuáº¥t hiá»‡n trong danh sÃ¡ch trÃªn thÃ¬ KHÃ”NG Ä‘Æ°á»£c táº¡o cÃ¢u há»i tá»« bÃ i Ä‘Ã³.
+` : ''}
+
 QUY TẮC BẮT BUỘC:
 - Phải tạo ĐÚNG ${totalConfiguredQuestions} câu, không nhiều hơn, không ít hơn.
 - Đánh số câu liên tục từ 1 đến ${totalConfiguredQuestions}.
 - Nếu một dạng có 0 câu thì KHÔNG được tạo dạng đó.
 - Bảng đáp án cuối bài phải đủ đúng ${totalConfiguredQuestions} câu.
 - Chỉ có các trường thông tin đầu đề sau: Trường, Năm học, Thời gian làm bài, Họ và tên, SBD. KHÔNG thêm trường khác như "SĐK".
+- KHÔNG được chỉ viết vài câu mẫu, KHÔNG được bỏ dở giữa chừng, KHÔNG được dùng dấu "..." để thay cho câu hỏi còn thiếu.
+- Phải viết đầy đủ nội dung cho toàn bộ ${totalConfiguredQuestions} câu trong cùng một tài liệu HTML.
 
 YÊU CẦU OUTPUT:
 1. Full HTML Document (<!DOCTYPE html>...)
@@ -726,18 +905,39 @@ h3, h4 { text-align: center; font-weight: bold; margin-top: 20px; }
 .options { margin-left: 20px; }
 .option-item { margin-bottom: 5px; }
 
-CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
+CHỈ trả về HTML thuần, KHÔNG có markdown code block.
+Trước khi kết thúc, hãy tự kiểm tra rằng trong phần đề có đủ chuỗi số câu sau: ${questionChecklist}.`;
 
-      const result = await callGeminiAI(prompt, apiKey, model);
-      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
-      const generatedQuestionCount = countQuestionsInGeneratedExam(cleanHtml);
+      let cleanHtml = '';
+      let generatedQuestionCount = 0;
 
-      if (generatedQuestionCount !== totalConfiguredQuestions) {
-        throw new Error(`Đề thi AI tạo ra ${generatedQuestionCount} câu, nhưng ma trận yêu cầu ${totalConfiguredQuestions} câu. Vui lòng bấm tạo lại.`);
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const retryPrompt = attempt === 1
+          ? basePrompt
+          : `${basePrompt}
+
+LẦN THỬ ${attempt}:
+- Ở lần trước bạn mới tạo được ${generatedQuestionCount}/${totalConfiguredQuestions} câu.
+- Hãy tạo lại TOÀN BỘ đề từ đầu, không sửa chắp vá.
+- Chỉ dừng khi đã có đủ từ Câu 1 đến Câu ${totalConfiguredQuestions}.
+- Nếu thiếu bất kỳ câu nào, hãy tiếp tục viết cho đến khi đủ.`;
+
+        const result = await callGeminiAI(retryPrompt, apiKey, model, {
+          temperature: attempt === 1 ? 0.1 : 0,
+          maxOutputTokens: 65536,
+        });
+
+        cleanHtml = sanitizeGeneratedHtml(result);
+        generatedQuestionCount = countQuestionsInGeneratedExam(cleanHtml);
+
+        if (generatedQuestionCount === totalConfiguredQuestions) {
+          setExamHtml(cleanHtml);
+          setCurrentStep(4);
+          return;
+        }
       }
 
-      setExamHtml(cleanHtml);
-      setCurrentStep(4);
+      throw new Error(`Đề thi AI tạo ra ${generatedQuestionCount} câu, nhưng ma trận yêu cầu ${totalConfiguredQuestions} câu sau 3 lần thử. Vui lòng bấm tạo lại.`);
     } catch (error: any) {
       Swal.fire({
         title: 'Lỗi tạo đề thi',
@@ -1137,6 +1337,9 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             <h2 className="text-lg font-semibold text-primary">Bảng đặc tả</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button onClick={handleUploadSpecs} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
+              <Upload size={13} /> Upload Đặc tả
+            </button>
             <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
             </button>

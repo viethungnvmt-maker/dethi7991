@@ -10,16 +10,27 @@ const createAI = (apiKey?: string) => {
   return new GoogleGenAI({ apiKey: key });
 };
 
+type GeminiCallOptions = {
+  temperature?: number;
+  maxOutputTokens?: number;
+};
+
 // ─── Generic AI call ────────────────────────────────────────────────
-export async function callGeminiAI(prompt: string, apiKey: string, modelName?: string) {
+export async function callGeminiAI(
+  prompt: string,
+  apiKey: string,
+  modelName?: string,
+  options: GeminiCallOptions = {},
+) {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
+  const { temperature = 0.2, maxOutputTokens = 65536 } = options;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: [{ parts: [{ text: prompt }] }],
-      config: { temperature: 0.2, maxOutputTokens: 65536 }
+      config: { temperature, maxOutputTokens }
     });
     return response.text || '';
   } catch (error: any) {
