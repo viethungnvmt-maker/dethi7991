@@ -45,9 +45,18 @@ const LOAI_KIEM_TRA = [
 
 interface ExamStructureRow {
   label: string;
-  biet: number;
-  hieu: number;
-  vandung: number;
+  biet: {
+    count: number;
+    score: number;
+  };
+  hieu: {
+    count: number;
+    score: number;
+  };
+  vandung: {
+    count: number;
+    score: number;
+  };
 }
 
 interface Lesson {
@@ -65,12 +74,68 @@ interface Chapter {
   lessons: Lesson[];
 }
 
+const STRUCTURE_LEVELS = [
+  { key: 'biet', label: 'Biết' },
+  { key: 'hieu', label: 'Hiểu' },
+  { key: 'vandung', label: 'Vận dụng' },
+] as const;
+
+type StructureLevelKey = typeof STRUCTURE_LEVELS[number]['key'];
+type StructureMetricKey = 'count' | 'score';
+
+const createStructureCell = () => ({ count: 0, score: 0 });
+
 const DEFAULT_EXAM_STRUCTURE: ExamStructureRow[] = [
-  { label: 'Dạng I (1 lựa chọn)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Dạng II (Đúng/Sai)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Dạng III (Trả lời ngắn)', biet: 0, hieu: 0, vandung: 0 },
-  { label: 'Tự luận', biet: 0, hieu: 0, vandung: 0 },
+  {
+    label: 'Dạng I (1 lựa chọn)',
+    biet: createStructureCell(),
+    hieu: createStructureCell(),
+    vandung: createStructureCell(),
+  },
+  {
+    label: 'Dạng II (Đúng/Sai)',
+    biet: createStructureCell(),
+    hieu: createStructureCell(),
+    vandung: createStructureCell(),
+  },
+  {
+    label: 'Dạng III (Trả lời ngắn)',
+    biet: createStructureCell(),
+    hieu: createStructureCell(),
+    vandung: createStructureCell(),
+  },
+  {
+    label: 'Tự luận',
+    biet: createStructureCell(),
+    hieu: createStructureCell(),
+    vandung: createStructureCell(),
+  },
 ];
+
+const formatScore = (value: number) => {
+  if (Number.isInteger(value)) return value.toString();
+  return value.toFixed(2).replace(/\.?0+$/, '');
+};
+
+const calculateTotalQuestions = (rows: ExamStructureRow[]) =>
+  rows.reduce(
+    (sum, row) => sum + STRUCTURE_LEVELS.reduce((rowSum, level) => rowSum + row[level.key].count, 0),
+    0,
+  );
+
+const calculateTotalPoints = (rows: ExamStructureRow[]) =>
+  rows.reduce(
+    (sum, row) =>
+      sum + STRUCTURE_LEVELS.reduce((rowSum, level) => rowSum + row[level.key].count * row[level.key].score, 0),
+    0,
+  );
+
+const isQuarterStep = (value: number) => Math.abs(value * 4 - Math.round(value * 4)) < 1e-9;
+
+const describeRowConfig = (row: ExamStructureRow) =>
+  STRUCTURE_LEVELS.map(
+    ({ key, label }) => `${label} ${row[key].count} câu x ${formatScore(row[key].score)} điểm/câu`,
+  ).join(', ');
 
 // ─── App ────────────────────────────────────────────────────────────
 export default function App() {
@@ -103,6 +168,8 @@ export default function App() {
   const [examHtml, setExamHtml] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
+  const totalConfiguredPoints = calculateTotalPoints(examStructure);
 
   useEffect(() => {
     localStorage.setItem('gemini_api_key', apiKey);
@@ -110,9 +177,18 @@ export default function App() {
   }, [apiKey, model]);
 
   // ─── Handlers ───────────────────────────────────────────────────
-  const updateStructure = (index: number, field: 'biet' | 'hieu' | 'vandung', value: number) => {
+  const updateStructure = (
+    index: number,
+    field: StructureLevelKey,
+    metric: StructureMetricKey,
+    value: number,
+  ) => {
+    const normalizedValue = Math.max(0, metric === 'count' ? Math.floor(value) : value);
+
     setExamStructure(prev => prev.map((row, i) =>
-      i === index ? { ...row, [field]: Math.max(0, value) } : row
+      i === index
+        ? { ...row, [field]: { ...row[field], [metric]: normalizedValue } }
+        : row
     ));
   };
 
@@ -257,6 +333,31 @@ export default function App() {
       });
       return;
     }
+    const hasInvalidScoreStep = examStructure.some((row) =>
+      STRUCTURE_LEVELS.some(({ key }) => !isQuarterStep(row[key].score)),
+    );
+    if (hasInvalidScoreStep) {
+      Swal.fire({
+        title: 'Điểm chưa hợp lệ',
+        text: 'Điểm mỗi câu phải là bội số của 0.25.',
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      return;
+    }
+    if (Math.abs(totalConfiguredPoints - 10) > 1e-9) {
+      Swal.fire({
+        title: 'Tổng điểm chưa đúng',
+        text: `Tổng điểm hiện tại là ${formatScore(totalConfiguredPoints)}. Vui lòng chỉnh về đúng 10 điểm trước khi tạo ma trận.`,
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      return;
+    }
     setIsGenerating(true);
     try {
       // Build selected topics data
@@ -275,7 +376,7 @@ export default function App() {
 
       const qc = examStructure;
       // qc[0] = Dạng I (1 lựa chọn), qc[1] = Dạng II (Đúng/Sai), qc[2] = Dạng III (Trả lời ngắn), qc[3] = Tự luận
-      const hasEssay = qc[3] && (qc[3].biet + qc[3].hieu + qc[3].vandung) > 0;
+      const hasEssay = qc[3] && (qc[3].biet.count + qc[3].hieu.count + qc[3].vandung.count) > 0;
 
       const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
@@ -283,12 +384,14 @@ export default function App() {
 - Loại đề: ${loaiKiemTra}
 - Thời gian: ${thoiGian} phút
 - Tổng số tiết trọng tâm: ${totalPeriods} tiết
+- Tổng số câu: ${totalConfiguredQuestions}
+- Tổng điểm theo cấu hình: ${formatScore(totalConfiguredPoints)}
 
-**CẤU TRÚC SỐ LƯỢNG CÂU HỎI (Bắt buộc tuân thủ):**
-- 1 lựa chọn (Dạng I): Biết ${qc[0].biet}, Hiểu ${qc[0].hieu}, VD ${qc[0].vandung}
-- Đúng - Sai (Dạng II): Biết ${qc[1].biet}, Hiểu ${qc[1].hieu}, VD ${qc[1].vandung}
-- Trả lời ngắn (Dạng III): Biết ${qc[2].biet}, Hiểu ${qc[2].hieu}, VD ${qc[2].vandung}
-- Tự luận: Biết ${qc[3].biet}, Hiểu ${qc[3].hieu}, VD ${qc[3].vandung}
+**CẤU TRÚC CÂU HỎI VÀ ĐIỂM/CÂU (Bắt buộc tuân thủ):**
+- 1 lựa chọn (Dạng I): ${describeRowConfig(qc[0])}
+- Đúng - Sai (Dạng II): ${describeRowConfig(qc[1])}
+- Trả lời ngắn (Dạng III): ${describeRowConfig(qc[2])}
+- Tự luận: ${describeRowConfig(qc[3])}
 
 **===== ĐỊNH DẠNG BẢNG BẮT BUỘC =====**
 Tiêu đề bảng (in đậm, căn giữa): **MA TRẬN ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} - ${monHoc.toUpperCase()} ${khoiLop}**
@@ -316,9 +419,8 @@ ${!hasEssay ? 'KHÔNG CÓ tự luận => KHÔNG tạo cột Tự luận.' : 'CÓ
 - Mọi điểm phải là bội số của 0.25
 - Tổng điểm = 10
 - Phân bổ câu hỏi theo tỷ lệ số tiết
-- **QUAN TRỌNG - Cách tính điểm Đúng/Sai (Dạng II):** Mỗi câu Đúng/Sai có 4 mệnh đề (a, b, c, d). Mỗi mệnh đề đúng được 0.25 điểm → 1 câu Đúng/Sai = 1.0 điểm. Khi tính điểm trong bảng, 1 câu Đúng/Sai = 1.0 điểm (KHÔNG phải 0.25 điểm/câu).
-- Dạng I (1 lựa chọn): tính điểm = tổng điểm trắc nghiệm / tổng số câu Dạng I
-- Dạng III (Trả lời ngắn): tính điểm tương tự Dạng I
+- Phải dùng đúng số câu và đúng điểm/câu theo cấu hình người dùng đã nhập ở trên, không tự chia lại điểm.
+- Nếu một ô có 0 câu thì để trống ở cả số câu, năng lực và điểm.
 
 **DỮ LIỆU ĐẦU VÀO:**
 ${JSON.stringify(selectedTopics, null, 2)}
@@ -726,31 +828,60 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       <div className="glass-card p-6 md:p-8">
         <div className="flex items-center gap-3 mb-6">
           <span className="section-number">3</span>
-          <h2 className="text-lg font-semibold text-primary">Cấu trúc đề thi (Số lượng câu hỏi)</h2>
+          <h2 className="text-lg font-semibold text-primary">Cấu trúc đề thi (Số câu và điểm/câu)</h2>
         </div>
 
         <div className="space-y-5">
           {examStructure.map((row, idx) => (
-            <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-              <div className="sm:w-52 shrink-0">
+            <div key={idx} className="flex flex-col xl:flex-row xl:items-start gap-3 sm:gap-4">
+              <div className="xl:w-52 shrink-0 pt-1">
                 <span className="text-sm font-medium text-primary">{row.label}</span>
               </div>
-              <div className="flex-1 grid grid-cols-3 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs text-primary mb-1.5">Biết</label>
-                  <input type="number" value={row.biet} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'biet', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
-                </div>
-                <div>
-                  <label className="block text-xs text-primary mb-1.5">Hiểu</label>
-                  <input type="number" value={row.hieu} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'hieu', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
-                </div>
-                <div>
-                  <label className="block text-xs text-primary mb-1.5">Vận dụng</label>
-                  <input type="number" value={row.vandung} onFocus={(e) => e.target.select()} onChange={(e) => updateStructure(idx, 'vandung', e.target.value === '' ? 0 : parseInt(e.target.value))} className="input-field text-center" min={0} />
-                </div>
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+                {STRUCTURE_LEVELS.map(({ key, label }) => (
+                  <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3">
+                    <label className="block text-xs font-semibold text-primary mb-2">{label}</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="block text-[11px] text-slate-400 mb-1">Số câu</span>
+                        <input
+                          type="number"
+                          value={row[key].count}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateStructure(idx, key, 'count', e.target.value === '' ? 0 : Number(e.target.value))}
+                          className="input-field text-center px-3 py-2.5"
+                          min={0}
+                          step={1}
+                        />
+                      </div>
+                      <div>
+                        <span className="block text-[11px] text-slate-400 mb-1">Điểm/câu</span>
+                        <input
+                          type="number"
+                          value={row[key].score}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateStructure(idx, key, 'score', e.target.value === '' ? 0 : Number(e.target.value))}
+                          className="input-field text-center px-3 py-2.5"
+                          min={0}
+                          step={0.25}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 px-4 py-3 rounded-xl border border-border bg-surface-light/40 text-sm">
+          <span className="text-slate-300">
+            Tổng câu: <strong className="text-primary">{totalConfiguredQuestions}</strong>
+          </span>
+          <span className={Math.abs(totalConfiguredPoints - 10) < 1e-9 ? 'text-slate-300' : 'text-amber-300'}>
+            Tổng điểm: <strong className="text-primary">{formatScore(totalConfiguredPoints)}/10</strong>
+          </span>
+          <span className="text-slate-500 text-xs">Điểm/câu nên nhập theo bước 0.25.</span>
         </div>
       </div>
 
