@@ -279,8 +279,16 @@ const extractHtmlDocumentFromResponse = (responseText: string) => {
 };
 
 const HTML_LIKE_DOCUMENT_REGEX = /<(?:!doctype|html|body|table|div|section|main)\b/i;
-const MAX_PREVIEW_SOURCE_LENGTH = 600_000;
-const MAX_PREVIEW_MARKUP_LENGTH = 180_000;
+const MAX_PREVIEW_SOURCE_LENGTH = 120_000;
+const MAX_PREVIEW_MARKUP_LENGTH = 60_000;
+const MAX_PREVIEW_TEXT_LENGTH = 20_000;
+const MAX_PREVIEW_NODE_COUNT = 1800;
+const PREVIEW_ALLOWED_TAGS = new Set([
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'p', 'div', 'span', 'br', 'strong', 'b', 'em', 'i', 'u',
+  'ul', 'ol', 'li',
+]);
 
 const prepareImportedHtmlDocument = (rawContent: string) => {
   const extracted = extractHtmlDocumentFromResponse(rawContent);
@@ -300,6 +308,53 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const sanitizePreviewText = (value: string) =>
+  value
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n');
+
+const buildPlainTextPreview = (value: string) =>
+  `<pre>${escapeHtml(sanitizePreviewText(htmlToPlainText(value).slice(0, MAX_PREVIEW_TEXT_LENGTH)))}</pre>`;
+
+const serializePreviewNode = (node: Node, budget: { remaining: number }): string => {
+  if (budget.remaining <= 0) return '';
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = sanitizePreviewText(node.textContent || '');
+    return text ? escapeHtml(text) : '';
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
+
+  budget.remaining -= 1;
+  const element = node as HTMLElement;
+  const tag = element.tagName.toLowerCase();
+
+  if (!PREVIEW_ALLOWED_TAGS.has(tag)) {
+    return Array.from(element.childNodes).map((child) => serializePreviewNode(child, budget)).join('');
+  }
+
+  const childMarkup = Array.from(element.childNodes).map((child) => serializePreviewNode(child, budget)).join('');
+
+  if (tag === 'br') {
+    return '<br />';
+  }
+
+  const attrs: string[] = [];
+  if ((tag === 'td' || tag === 'th') && element.getAttribute('colspan')) {
+    attrs.push(`colspan="${escapeHtml(element.getAttribute('colspan') || '1')}"`);
+  }
+  if ((tag === 'td' || tag === 'th') && element.getAttribute('rowspan')) {
+    attrs.push(`rowspan="${escapeHtml(element.getAttribute('rowspan') || '1')}"`);
+  }
+
+  const attrText = attrs.length > 0 ? ` ${attrs.join(' ')}` : '';
+  return `<${tag}${attrText}>${childMarkup}</${tag}>`;
+};
+
 const buildSafePreviewHtml = (rawContent: string, title: string) => {
   if (!rawContent) return '';
 
@@ -307,20 +362,21 @@ const buildSafePreviewHtml = (rawContent: string, title: string) => {
   const limitedSource = prepared.slice(0, MAX_PREVIEW_SOURCE_LENGTH);
   const sourceWasTrimmed = prepared.length > MAX_PREVIEW_SOURCE_LENGTH;
 
-  let bodyMarkup = '';
+  let bodyMarkup = sourceWasTrimmed ? buildPlainTextPreview(limitedSource) : '';
 
-  if (typeof DOMParser !== 'undefined') {
+  if (!bodyMarkup && typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(limitedSource, 'text/html');
-    doc.querySelectorAll('script, style, link, meta, title, iframe, object, embed, svg, canvas').forEach((node) => node.remove());
-    bodyMarkup = (doc.body?.innerHTML || '').trim();
+    doc.querySelectorAll('script, style, link, meta, title, iframe, object, embed, svg, canvas, img, video, audio, source').forEach((node) => node.remove());
+    const budget = { remaining: MAX_PREVIEW_NODE_COUNT };
+    bodyMarkup = Array.from(doc.body?.childNodes || []).map((node) => serializePreviewNode(node, budget)).join('').trim();
   }
 
   if (!bodyMarkup) {
-    bodyMarkup = `<pre>${escapeHtml(htmlToPlainText(limitedSource).slice(0, 20000))}</pre>`;
+    bodyMarkup = buildPlainTextPreview(limitedSource);
   }
 
   if (bodyMarkup.length > MAX_PREVIEW_MARKUP_LENGTH) {
-    bodyMarkup = `<pre>${escapeHtml(htmlToPlainText(bodyMarkup).slice(0, 20000))}</pre>`;
+    bodyMarkup = buildPlainTextPreview(bodyMarkup);
   }
 
   const previewNotice = sourceWasTrimmed
@@ -872,10 +928,24 @@ th { font-weight: bold; }
   ) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.html,.htm,.doc';
+    input.accept = '.html,.htm';
     input.onchange = (e: any) => {
       const file = e.target.files?.[0];
       if (file) {
+        const normalizedFileName = file.name.toLowerCase();
+
+        if (normalizedFileName.endsWith('.doc')) {
+          Swal.fire({
+            title: 'Chưa hỗ trợ upload .doc',
+            text: `File .doc chỉ phù hợp để mở bằng Word. Với phần ${label}, vui lòng dùng nút "Tải HTML" rồi upload lại file .html.`,
+            icon: 'warning',
+            confirmButtonColor: '#2dd4a8',
+            background: '#132a1f',
+            color: '#e2e8f0',
+          });
+          return;
+        }
+
         if (file.size > 3 * 1024 * 1024) {
           Swal.fire({
             title: 'File quá lớn',
@@ -1444,7 +1514,7 @@ LẦN THỬ ${attempt}:
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleUploadMatrix} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
-              <Upload size={13} /> Upload Ma trận
+              <Upload size={13} /> Upload HTML Ma trận
             </button>
             <button onClick={() => downloadDoc(matrixHtml, `ma_tran_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!matrixHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
@@ -1508,7 +1578,7 @@ LẦN THỬ ${attempt}:
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleUploadSpecs} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors">
-              <Upload size={13} /> Upload Đặc tả
+              <Upload size={13} /> Upload HTML Đặc tả
             </button>
             <button onClick={() => downloadDoc(specsHtml, `dac_ta_${monHoc}_${loaiKiemTra.replace(/\s/g, '_')}`, true)} disabled={!specsHtml} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border text-slate-400 hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-30">
               <FileText size={13} /> Tải Word (.doc)
