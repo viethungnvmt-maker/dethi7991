@@ -169,11 +169,12 @@ const calculateRowTotals = (row: ExamStructureRow) => ({
   score: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count * row[level.key].score, 0),
 });
 
+const MAX_PROMPT_HTML_TEXT_LENGTH = 12_000;
+const MAX_IMPORTED_WORKING_TEXT_LENGTH = 16_000;
+
 const compactHtmlForPrompt = (html: string) =>
-  html
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/\s+/g, ' ')
+  sanitizePreviewText(htmlToPlainText(html))
+    .slice(0, MAX_PROMPT_HTML_TEXT_LENGTH)
     .trim();
 
 const buildExamQuestionRanges = (rows: ExamStructureRow[]) => {
@@ -197,23 +198,27 @@ const buildExamQuestionRanges = (rows: ExamStructureRow[]) => {
   });
 };
 
-const htmlToPlainText = (html: string) => {
-  if (typeof DOMParser !== 'undefined') {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    return (doc.body.textContent || '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  return html
+const htmlToPlainText = (html: string) =>
+  html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<img[^>]*>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(?:br|hr)\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|section|article|main|header|footer|aside|table|thead|tbody|tfoot|tr|ul|ol|li|h1|h2|h3|h4|h5|h6|pre)>/gi, '\n')
+    .replace(/<(?:td|th)\b[^>]*>/gi, ' | ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;|&#160;/gi, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
-};
 
 const countQuestionsInGeneratedExam = (html: string) => {
   const plainText = htmlToPlainText(html);
@@ -310,6 +315,14 @@ const sanitizePreviewText = (value: string) =>
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n');
+
+const buildWorkingHtmlFromImport = (html: string, title: string) => {
+  const text = sanitizePreviewText(htmlToPlainText(html))
+    .slice(0, MAX_IMPORTED_WORKING_TEXT_LENGTH)
+    .trim();
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><pre>${escapeHtml(text)}</pre></body></html>`;
+};
 
 const wrapPreviewText = (value: string, maxCharsPerLine: number) => {
   const lines: string[] = [];
@@ -1017,10 +1030,15 @@ th { font-weight: bold; }
             return;
           }
 
+          const workingHtml = buildWorkingHtmlFromImport(
+            normalizedHtml,
+            target === 'matrix' ? 'Ma trận đề thi' : 'Bảng đặc tả đề thi',
+          );
+
           if (target === 'matrix') {
-            setMatrixHtml(normalizedHtml);
+            setMatrixHtml(workingHtml);
           } else {
-            setSpecsHtml(normalizedHtml);
+            setSpecsHtml(workingHtml);
           }
         };
         reader.readAsText(file);
@@ -1042,10 +1060,11 @@ th { font-weight: bold; }
     setIsGenerating(true);
     await waitForNextPaint();
     try {
-      const prompt = `Dựa trên Ma trận đề kiểm tra (HTML) đã tạo, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
+      const compactMatrixHtml = compactHtmlForPrompt(matrixHtml);
+      const prompt = `Dựa trên Ma trận đề kiểm tra sau, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
 
-MA TRẬN ĐẦU VÀO:
-${matrixHtml}
+MA TRẬN ĐẦU VÀO (đã rút gọn):
+${compactMatrixHtml}
 
 YÊU CẦU:
 1. Tiêu đề bảng: "ĐẶC TẢ ĐỀ KIỂM TRA ${loaiKiemTra.toUpperCase()} – ${monHoc.toUpperCase()}"
@@ -1202,7 +1221,7 @@ LẦN THỬ ${attempt}:
 
         const result = await callGeminiAI(retryPrompt, apiKey, model, {
           temperature: attempt === 1 ? 0.1 : 0,
-          maxOutputTokens: 65536,
+          maxOutputTokens: 32768,
         });
 
         cleanHtml = extractHtmlDocumentFromResponse(result);

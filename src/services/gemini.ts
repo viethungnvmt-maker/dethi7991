@@ -24,7 +24,7 @@ export async function callGeminiAI(
 ) {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
-  const { temperature = 0.2, maxOutputTokens = 65536 } = options;
+  const { temperature = 0.2, maxOutputTokens = 32768 } = options;
 
   try {
     const response = await ai.models.generateContent({
