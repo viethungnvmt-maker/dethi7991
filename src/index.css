@@ -47,8 +47,8 @@
 .number-cell {
   font-size: 1.05rem;
   font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  line-height: 1.15;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
