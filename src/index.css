@@ -25,7 +25,7 @@
 }
 
 .input-field {
-  @apply w-full bg-surface border border-border rounded-lg px-4 py-3 text-slate-200
+  @apply w-full box-border bg-surface border border-border rounded-lg px-4 py-3 text-slate-200 ring-inset
     focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all
     appearance-none;
 }
@@ -45,7 +45,7 @@
 }
 
 .number-cell {
-  font-size: 0.98rem;
+  font-size: 0.94rem;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: 0;

@@ -158,10 +158,24 @@ const renderStructureLabel = (label: string) => {
     return <span className="block max-w-full text-sm font-medium text-primary leading-6 break-words [overflow-wrap:anywhere]">{label}</span>;
   }
 
+  const parenthesized = match[2].trim();
+  const innerText = parenthesized.slice(1, -1);
+  const slashParts = innerText.split('/').map((part) => part.trim()).filter(Boolean);
+
   return (
     <span className="block max-w-full text-sm font-medium text-primary leading-6 break-words [overflow-wrap:anywhere]">
       <span className="block">{match[1].trim()}</span>
-      <span className="block">{match[2].trim()}</span>
+      {slashParts.length > 1 ? (
+        <span className="block">
+          {slashParts.map((part, index) => (
+            <span key={`${label}-${part}-${index}`} className="block">
+              {index === 0 ? `(${part}/` : index === slashParts.length - 1 ? `${part})` : `${part}/`}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="block">{parenthesized}</span>
+      )}
     </span>
   );
 };
@@ -874,11 +888,11 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               <div className="min-w-0 shrink-0 pt-1">
                 {renderStructureLabel(row.label)}
               </div>
-              <div className="grid w-full grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.16fr)] gap-3 xl:gap-1.5">
+              <div className="grid w-full grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.18fr)] gap-3 xl:gap-1.5">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
                   <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3.5">
                     <label className="block text-sm font-semibold text-primary mb-2.5">{label}</label>
-                    <div className="grid grid-cols-[minmax(3.4rem,0.72fr)_minmax(5.1rem,1.28fr)] gap-2">
+                    <div className="grid grid-cols-[minmax(3.15rem,0.64fr)_minmax(5.5rem,1.36fr)] gap-2">
                       <div className="min-w-0">
                         <span className="metric-caption">Số câu</span>
                         <input
@@ -908,7 +922,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                 ))}
                 <div className="rounded-xl border border-primary/30 bg-primary/8 p-3.5">
                   <label className="block text-sm font-semibold text-primary mb-2.5">Tổng</label>
-                  <div className="grid grid-cols-[minmax(3.4rem,0.72fr)_minmax(5.1rem,1.28fr)] gap-2">
+                  <div className="grid grid-cols-[minmax(3.15rem,0.64fr)_minmax(5.5rem,1.36fr)] gap-2">
                     <div className="min-w-0">
                       <span className="metric-caption">Tổng câu</span>
                       <div className="input-field number-cell text-center px-1.5 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
