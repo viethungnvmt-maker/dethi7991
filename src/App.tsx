@@ -151,6 +151,21 @@ const describeRowConfig = (row: ExamStructureRow) =>
     ({ key, label }) => `${label} ${row[key].count} câu x ${formatScore(row[key].score)} điểm/câu`,
   ).join(', ');
 
+const renderStructureLabel = (label: string) => {
+  const match = label.match(/^(.*?)(\s*\(.+\))$/);
+
+  if (!match) {
+    return <span className="text-sm font-medium text-primary leading-6">{label}</span>;
+  }
+
+  return (
+    <span className="text-sm font-medium text-primary leading-6">
+      <span className="block">{match[1].trim()}</span>
+      <span className="block">{match[2].trim()}</span>
+    </span>
+  );
+};
+
 // ─── App ────────────────────────────────────────────────────────────
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -857,20 +872,13 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
             return (
             <div key={idx} className="flex flex-col xl:flex-row xl:items-start gap-3 sm:gap-4">
               <div className="xl:w-44 shrink-0 pt-1">
-                {row.label === 'Dạng I (1 lựa chọn)' ? (
-                  <span className="text-sm font-medium text-primary leading-6">
-                    <span className="block">Dạng I</span>
-                    <span className="block">(1 lựa chọn)</span>
-                  </span>
-                ) : (
-                  <span className="text-sm font-medium text-primary leading-6">{row.label}</span>
-                )}
+                {renderStructureLabel(row.label)}
               </div>
               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
                   <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-4">
                     <label className="block text-sm font-semibold text-primary mb-3">{label}</label>
-                    <div className="grid grid-cols-1 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <span className="block text-xs text-slate-400 mb-1.5">Số câu</span>
                         <input
@@ -900,7 +908,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                 ))}
                 <div className="rounded-xl border border-primary/30 bg-primary/8 p-4">
                   <label className="block text-sm font-semibold text-primary mb-3">Tổng</label>
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <span className="block text-xs text-slate-400 mb-1.5">Tổng câu</span>
                       <div className="input-field text-center text-lg font-semibold px-3 py-3.5 min-h-14 bg-surface-light/70 text-primary">
