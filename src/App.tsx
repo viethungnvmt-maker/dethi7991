@@ -361,6 +361,7 @@ const wrapPreviewText = (value: string, maxCharsPerLine: number) => {
 
 const buildSafePreviewImageUrl = (rawContent: string, title: string) => {
   if (!rawContent) return '';
+  return '';
 
   const prepared = prepareImportedHtmlDocument(rawContent);
   const limitedSource = prepared.slice(0, MAX_PREVIEW_SOURCE_LENGTH);
@@ -401,6 +402,15 @@ const buildSafePreviewImageUrl = (rawContent: string, title: string) => {
 </svg>`;
 
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+};
+
+const buildSafePreviewExcerpt = (rawContent: string) => {
+  if (!rawContent) return '';
+
+  const prepared = prepareImportedHtmlDocument(rawContent);
+  return sanitizePreviewText(
+    htmlToPlainText(prepared.slice(0, MAX_PREVIEW_SOURCE_LENGTH)),
+  ).slice(0, MAX_PREVIEW_TEXT_LENGTH);
 };
 
 const waitForNextPaint = () =>
@@ -595,6 +605,19 @@ export default function App() {
   const examPreviewImageUrl = useMemo(
     () => (examHtml ? buildSafePreviewImageUrl(examHtml, 'Đề thi hoàn chỉnh') : ''),
     [examHtml],
+  );
+
+  const matrixPreviewExcerpt = useMemo(
+    () => (currentStep === 2 && matrixHtml ? buildSafePreviewExcerpt(matrixHtml) : ''),
+    [currentStep, matrixHtml],
+  );
+  const specsPreviewExcerpt = useMemo(
+    () => (currentStep === 3 && specsHtml ? buildSafePreviewExcerpt(specsHtml) : ''),
+    [currentStep, specsHtml],
+  );
+  const examPreviewExcerpt = useMemo(
+    () => (currentStep === 4 && examHtml ? buildSafePreviewExcerpt(examHtml) : ''),
+    [currentStep, examHtml],
   );
 
   useEffect(() => {
@@ -1564,20 +1587,10 @@ LẦN THỬ ${attempt}:
               <Eye size={14} className="text-slate-400" />
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              {matrixPreviewImageUrl ? (
-                <img
-                  src={matrixPreviewImageUrl}
-                  alt="Matrix Preview"
-                  className="block w-full h-auto align-top"
-                  loading="lazy"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                  Khong the tao anh xem truoc cho ma tran.
-                </div>
-              )}
+            <div className="bg-slate-950 rounded-xl overflow-auto h-[650px] border border-border">
+              <pre className="whitespace-pre-wrap break-words p-5 text-[13px] leading-6 text-slate-200 font-mono">
+                {matrixPreviewExcerpt || 'Ban xem truoc da duoc tat de tranh loi bo nho. Hay dung nut Tai HTML neu can xem day du.'}
+              </pre>
             </div>
           </div>
         ) : (
@@ -1634,20 +1647,10 @@ LẦN THỬ ${attempt}:
               <Eye size={14} className="text-slate-400" />
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              {specsPreviewImageUrl ? (
-                <img
-                  src={specsPreviewImageUrl}
-                  alt="Specs Preview"
-                  className="block w-full h-auto align-top"
-                  loading="lazy"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                  Khong the tao anh xem truoc cho bang dac ta.
-                </div>
-              )}
+            <div className="bg-slate-950 rounded-xl overflow-auto h-[650px] border border-border">
+              <pre className="whitespace-pre-wrap break-words p-5 text-[13px] leading-6 text-slate-200 font-mono">
+                {specsPreviewExcerpt || 'Ban xem truoc da duoc tat de tranh loi bo nho. Hay dung nut Tai HTML neu can xem day du.'}
+              </pre>
             </div>
           </div>
         ) : (
@@ -1689,20 +1692,10 @@ LẦN THỬ ${attempt}:
               <Eye size={14} className="text-slate-400" />
               <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
-              {examPreviewImageUrl ? (
-                <img
-                  src={examPreviewImageUrl}
-                  alt="Exam Preview"
-                  className="block w-full h-auto align-top"
-                  loading="lazy"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                  Khong the tao anh xem truoc cho de thi.
-                </div>
-              )}
+            <div className="bg-slate-950 rounded-xl overflow-auto h-[650px] border border-border">
+              <pre className="whitespace-pre-wrap break-words p-5 text-[13px] leading-6 text-slate-200 font-mono">
+                {examPreviewExcerpt || 'Ban xem truoc da duoc tat de tranh loi bo nho. Hay dung nut Tai HTML neu can xem day du.'}
+              </pre>
             </div>
           </div>
         ) : (
