@@ -131,6 +131,21 @@ const parseCountInputValue = (value: string) => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
+const formatScoreInputValue = (value: number) => formatScore(value).replace('.', ',');
+
+const parseScoreInputValue = (value: string) => {
+  const normalized = value.replace(',', '.').replace(/[^0-9.]/g, '');
+  const [integerPart = '', ...decimalParts] = normalized.split('.');
+  const sanitized = decimalParts.length > 0
+    ? `${integerPart}.${decimalParts.join('')}`
+    : integerPart;
+  const parsed = sanitized === '' ? 0 : Number(sanitized);
+
+  return Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+};
+
+const snapScoreValue = (value: number) => Math.max(0, Math.round((value + Number.EPSILON) * 4) / 4);
+
 const calculateTotalQuestions = (rows: ExamStructureRow[]) =>
   rows.reduce(
     (sum, row) => sum + STRUCTURE_LEVELS.reduce((rowSum, level) => rowSum + row[level.key].count, 0),
@@ -271,6 +286,19 @@ export default function App() {
         ? { ...row, [field]: { ...row[field], [metric]: normalizedValue } }
         : row
     ));
+  };
+
+  const handleScoreKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+    field: StructureLevelKey,
+    currentValue: number,
+  ) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+
+    e.preventDefault();
+    const delta = e.key === 'ArrowUp' ? 0.25 : -0.25;
+    updateStructure(index, field, 'score', snapScoreValue(currentValue + delta));
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -951,7 +979,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                 {STRUCTURE_LEVELS.map(({ key, label }) => (
                   <div key={key} className="rounded-xl border border-border bg-surface-light/30 p-3.5 overflow-hidden">
                     <label className="block text-sm font-semibold text-primary mb-2.5">{label}</label>
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="grid grid-cols-[minmax(3rem,0.84fr)_minmax(3.8rem,1.16fr)] gap-1.5">
                       <div className="min-w-0">
                         <span className="metric-caption">Số câu</span>
                         <input
@@ -960,19 +988,20 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                           value={String(row[key].count)}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateStructure(idx, key, 'count', parseCountInputValue(e.target.value))}
-                          className="input-field number-cell text-center px-1.5 py-3 min-h-12"
+                          className="input-field metric-input metric-input-count number-cell min-h-12"
                         />
                       </div>
                       <div className="min-w-0">
                         <span className="metric-caption">Điểm/câu</span>
                         <input
-                          type="number"
-                          value={row[key].score}
+                          type="text"
+                          inputMode="decimal"
+                          value={formatScoreInputValue(row[key].score)}
                           onFocus={(e) => e.target.select()}
-                          onChange={(e) => updateStructure(idx, key, 'score', e.target.value === '' ? 0 : Number(e.target.value))}
-                          className="input-field number-cell text-center px-1.5 py-3 min-h-12"
-                          min={0}
-                          step={0.25}
+                          onChange={(e) => updateStructure(idx, key, 'score', parseScoreInputValue(e.target.value))}
+                          onBlur={() => updateStructure(idx, key, 'score', snapScoreValue(row[key].score))}
+                          onKeyDown={(e) => handleScoreKeyDown(e, idx, key, row[key].score)}
+                          className="input-field metric-input metric-input-score number-cell min-h-12"
                         />
                       </div>
                     </div>
@@ -980,16 +1009,16 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                 ))}
                 <div className="rounded-xl border border-primary/30 bg-primary/8 p-3.5 overflow-hidden">
                   <label className="block text-sm font-semibold text-primary mb-2.5">Tổng</label>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-[minmax(3rem,0.84fr)_minmax(3.8rem,1.16fr)] gap-1.5">
                     <div className="min-w-0">
                       <span className="metric-caption">Tổng câu</span>
-                      <div className="input-field number-cell text-center px-1.5 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
+                      <div className="input-field metric-box metric-box-count number-cell min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
                         {rowTotals.count}
                       </div>
                     </div>
                     <div className="min-w-0">
                       <span className="metric-caption">Tổng điểm</span>
-                      <div className="input-field number-cell text-center px-1.5 py-3 min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
+                      <div className="input-field metric-box metric-box-score number-cell min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
                         {formatScore(rowTotals.score)}
                       </div>
                     </div>

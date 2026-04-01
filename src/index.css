@@ -49,7 +49,43 @@
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: 0;
-  font-variant-numeric: proportional-nums;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.input-field.metric-input {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.input-field.metric-input.metric-input-count {
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  text-align: center;
+}
+
+.input-field.metric-input.metric-input-score {
+  padding-left: 0.15rem;
+  padding-right: 0.25rem;
+  text-align: right;
+}
+
+.input-field.metric-box {
+  display: flex;
+  align-items: center;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.input-field.metric-box.metric-box-count {
+  justify-content: center;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}
+
+.input-field.metric-box.metric-box-score {
+  justify-content: flex-end;
+  padding-left: 0.15rem;
+  padding-right: 0.25rem;
 }
 
 .metric-caption {
