@@ -16,7 +16,6 @@ import {
   Loader2,
   Download,
   FileText,
-  Code,
   Eye,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -126,6 +125,25 @@ const formatScore = (value: number) => {
   return value.toFixed(2).replace(/\.?0+$/, '');
 };
 
+const formatScoreInputValue = (value: number) => formatScore(value).replace('.', ',');
+
+const parseCountInputValue = (value: string) => {
+  const digitsOnly = value.replace(/\D/g, '');
+  const parsed = digitsOnly === '' ? 0 : Number(digitsOnly);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const parseScoreInputValue = (value: string) => {
+  const normalized = value.replace(',', '.').replace(/[^0-9.]/g, '');
+  const [integerPart = '', ...decimalParts] = normalized.split('.');
+  const sanitized = decimalParts.length > 0
+    ? `${integerPart}.${decimalParts.join('')}`
+    : integerPart;
+
+  const parsed = sanitized === '' ? 0 : Number(sanitized);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
 const calculateTotalQuestions = (rows: ExamStructureRow[]) =>
   rows.reduce(
     (sum, row) => sum + STRUCTURE_LEVELS.reduce((rowSum, level) => rowSum + row[level.key].count, 0),
@@ -143,6 +161,39 @@ const calculateRowTotals = (row: ExamStructureRow) => ({
   count: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count, 0),
   score: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count * row[level.key].score, 0),
 });
+
+const compactHtmlForPrompt = (html: string) =>
+  html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildExamQuestionRanges = (rows: ExamStructureRow[]) => {
+  let currentQuestion = 1;
+
+  return rows.map((row) => {
+    const total = calculateRowTotals(row).count;
+    if (total === 0) {
+      return { label: row.label, total, start: 0, end: 0 };
+    }
+
+    const range = {
+      label: row.label,
+      total,
+      start: currentQuestion,
+      end: currentQuestion + total - 1,
+    };
+
+    currentQuestion += total;
+    return range;
+  });
+};
+
+const countQuestionsInGeneratedExam = (html: string) => {
+  const matches = [...html.matchAll(/Câu\s*(\d+)/gi)];
+  return new Set(matches.map((match) => Number(match[1]))).size;
+};
 
 const isQuarterStep = (value: number) => Math.abs(value * 4 - Math.round(value * 4)) < 1e-9;
 
@@ -612,10 +663,25 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
     if (!specsHtml) return;
     setIsGenerating(true);
     try {
+      const examQuestionRanges = buildExamQuestionRanges(examStructure);
+      const compactSpecsHtml = compactHtmlForPrompt(specsHtml);
+      const activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
+
       const prompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
 BẢNG ĐẶC TẢ:
-${specsHtml}
+${compactSpecsHtml}
+
+CẤU TRÚC SỐ CÂU BẮT BUỘC PHẢI KHỚP 100%:
+- Tổng số câu toàn đề: ${totalConfiguredQuestions}
+${activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')}
+
+QUY TẮC BẮT BUỘC:
+- Phải tạo ĐÚNG ${totalConfiguredQuestions} câu, không nhiều hơn, không ít hơn.
+- Đánh số câu liên tục từ 1 đến ${totalConfiguredQuestions}.
+- Nếu một dạng có 0 câu thì KHÔNG được tạo dạng đó.
+- Bảng đáp án cuối bài phải đủ đúng ${totalConfiguredQuestions} câu.
+- Chỉ có các trường thông tin đầu đề sau: Trường, Năm học, Thời gian làm bài, Họ và tên, SBD. KHÔNG thêm trường khác như "SĐK".
 
 YÊU CẦU OUTPUT:
 1. Full HTML Document (<!DOCTYPE html>...)
@@ -649,6 +715,12 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const result = await callGeminiAI(prompt, apiKey, model);
       const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      const generatedQuestionCount = countQuestionsInGeneratedExam(cleanHtml);
+
+      if (generatedQuestionCount !== totalConfiguredQuestions) {
+        throw new Error(`Đề thi AI tạo ra ${generatedQuestionCount} câu, nhưng ma trận yêu cầu ${totalConfiguredQuestions} câu. Vui lòng bấm tạo lại.`);
+      }
+
       setExamHtml(cleanHtml);
       setCurrentStep(4);
     } catch (error: any) {
@@ -896,25 +968,23 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                       <div className="min-w-0">
                         <span className="metric-caption">Số câu</span>
                         <input
-                          type="number"
-                          value={row[key].count}
+                          type="text"
+                          inputMode="numeric"
+                          value={String(row[key].count)}
                           onFocus={(e) => e.target.select()}
-                          onChange={(e) => updateStructure(idx, key, 'count', e.target.value === '' ? 0 : Number(e.target.value))}
+                          onChange={(e) => updateStructure(idx, key, 'count', parseCountInputValue(e.target.value))}
                           className="input-field number-cell text-center px-1.5 py-3 min-h-12"
-                          min={0}
-                          step={1}
                         />
                       </div>
                       <div className="min-w-0">
                         <span className="metric-caption">Điểm/câu</span>
                         <input
-                          type="number"
-                          value={row[key].score}
+                          type="text"
+                          inputMode="decimal"
+                          value={formatScoreInputValue(row[key].score)}
                           onFocus={(e) => e.target.select()}
-                          onChange={(e) => updateStructure(idx, key, 'score', e.target.value === '' ? 0 : Number(e.target.value))}
+                          onChange={(e) => updateStructure(idx, key, 'score', parseScoreInputValue(e.target.value))}
                           className="input-field number-cell text-center px-1.5 py-3 min-h-12"
-                          min={0}
-                          step={0.25}
                         />
                       </div>
                     </div>
@@ -1012,37 +1082,18 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         </div>
 
         {matrixHtml ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: Source code */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Code size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
-              </div>
-              <div className="bg-bg border border-border rounded-xl overflow-hidden">
-                <textarea
-                  value={matrixHtml}
-                  onChange={(e) => setMatrixHtml(e.target.value)}
-                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
-                  spellCheck={false}
-                />
-              </div>
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Eye size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-
-            {/* Right: Preview */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
-              </div>
-              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
-                <iframe
-                  srcDoc={matrixHtml}
-                  className="w-full h-full"
-                  title="Matrix Preview"
-                  sandbox="allow-same-origin"
-                />
-              </div>
+            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
+              <iframe
+                srcDoc={matrixHtml}
+                className="w-full h-full"
+                title="Matrix Preview"
+                sandbox="allow-same-origin"
+              />
             </div>
           </div>
         ) : (
@@ -1091,34 +1142,18 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         </div>
 
         {specsHtml ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Code size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
-              </div>
-              <div className="bg-bg border border-border rounded-xl overflow-hidden">
-                <textarea
-                  value={specsHtml}
-                  onChange={(e) => setSpecsHtml(e.target.value)}
-                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
-                  spellCheck={false}
-                />
-              </div>
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Eye size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
-              </div>
-              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
-                <iframe
-                  srcDoc={specsHtml}
-                  className="w-full h-full"
-                  title="Specs Preview"
-                  sandbox="allow-same-origin"
-                />
-              </div>
+            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
+              <iframe
+                srcDoc={specsHtml}
+                className="w-full h-full"
+                title="Specs Preview"
+                sandbox="allow-same-origin"
+              />
             </div>
           </div>
         ) : (
@@ -1155,34 +1190,18 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         </div>
 
         {examHtml ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Code size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source Code (HTML/Markdown)</span>
-              </div>
-              <div className="bg-bg border border-border rounded-xl overflow-hidden">
-                <textarea
-                  value={examHtml}
-                  onChange={(e) => setExamHtml(e.target.value)}
-                  className="w-full h-[500px] bg-transparent text-slate-300 text-xs font-mono p-4 resize-none outline-none"
-                  spellCheck={false}
-                />
-              </div>
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Eye size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Eye size={14} className="text-slate-400" />
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Xem trước</span>
-              </div>
-              <div className="bg-white rounded-xl overflow-auto h-[500px] border border-border">
-                <iframe
-                  srcDoc={examHtml}
-                  className="w-full h-full"
-                  title="Exam Preview"
-                  sandbox="allow-same-origin"
-                />
-              </div>
+            <div className="bg-white rounded-xl overflow-auto h-[650px] border border-border">
+              <iframe
+                srcDoc={examHtml}
+                className="w-full h-full"
+                title="Exam Preview"
+                sandbox="allow-same-origin"
+              />
             </div>
           </div>
         ) : (
@@ -1309,7 +1328,8 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
                   onChange={(e) => setModel(e.target.value)}
                   className="input-field"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Mới nhất)</option>
+                  <option value="gemini-3-flash-preview">Gemini 3 Flash (Preview)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                   <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (Thông minh)</option>
                   <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
