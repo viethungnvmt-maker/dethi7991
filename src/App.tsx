@@ -278,6 +278,18 @@ const extractHtmlDocumentFromResponse = (responseText: string) => {
   return sanitized.slice(start).trim();
 };
 
+const HTML_LIKE_DOCUMENT_REGEX = /<(?:!doctype|html|body|table|div|section|main)\b/i;
+
+const prepareImportedHtmlDocument = (rawContent: string) => {
+  const extracted = extractHtmlDocumentFromResponse(rawContent);
+
+  return extracted
+    .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, '')
+    .replace(/<\?xml[\s\S]*?\?>/gi, '')
+    .replace(/<xml[\s\S]*?<\/xml>/gi, '')
+    .trim();
+};
+
 const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
   const ranges = buildExamQuestionRanges(rows);
 
@@ -735,7 +747,7 @@ th { font-weight: bold; }
 3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const result = await callGeminiAI(prompt, apiKey, model);
-      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      const cleanHtml = extractHtmlDocumentFromResponse(result);
       setMatrixHtml(cleanHtml);
       setCurrentStep(2);
     } catch (error: any) {
@@ -793,16 +805,50 @@ th { font-weight: bold; }
     URL.revokeObjectURL(url);
   };
 
-  const handleUploadMatrix = () => {
+  const importHtmlLikeDocument = (
+    target: 'matrix' | 'specs',
+    label: 'ma trận' | 'đặc tả',
+  ) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.html,.htm,.doc';
     input.onchange = (e: any) => {
       const file = e.target.files?.[0];
       if (file) {
+        if (file.size > 3 * 1024 * 1024) {
+          Swal.fire({
+            title: 'File quá lớn',
+            text: `File ${label} vượt quá giới hạn an toàn 3MB để xem trước trong trình duyệt.`,
+            icon: 'warning',
+            confirmButtonColor: '#2dd4a8',
+            background: '#132a1f',
+            color: '#e2e8f0',
+          });
+          return;
+        }
+
         const reader = new FileReader();
         reader.onload = () => {
-          setMatrixHtml(reader.result as string);
+          const rawContent = String(reader.result || '');
+          const normalizedHtml = prepareImportedHtmlDocument(rawContent);
+
+          if (!HTML_LIKE_DOCUMENT_REGEX.test(normalizedHtml)) {
+            Swal.fire({
+              title: 'File chưa hỗ trợ',
+              text: `Chỉ nên upload file HTML hoặc file .doc do ứng dụng này xuất ra cho phần ${label}.`,
+              icon: 'warning',
+              confirmButtonColor: '#2dd4a8',
+              background: '#132a1f',
+              color: '#e2e8f0',
+            });
+            return;
+          }
+
+          if (target === 'matrix') {
+            setMatrixHtml(normalizedHtml);
+          } else {
+            setSpecsHtml(normalizedHtml);
+          }
         };
         reader.readAsText(file);
       }
@@ -810,21 +856,12 @@ th { font-weight: bold; }
     input.click();
   };
 
+  const handleUploadMatrix = () => {
+    importHtmlLikeDocument('matrix', 'ma trận');
+  };
+
   const handleUploadSpecs = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.html,.htm,.doc';
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          setSpecsHtml(reader.result as string);
-        };
-        reader.readAsText(file);
-      }
-    };
-    input.click();
+    importHtmlLikeDocument('specs', 'đặc tả');
   };
 
   const handleGenerateSpecs = async () => {
@@ -857,7 +894,7 @@ th { font-weight: bold; }
 CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const result = await callGeminiAI(prompt, apiKey, model);
-      const cleanHtml = result.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      const cleanHtml = extractHtmlDocumentFromResponse(result);
       setSpecsHtml(cleanHtml);
       setCurrentStep(3);
     } catch (error: any) {
