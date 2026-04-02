@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
-import { callGeminiAI, parsePPCTFile } from './services/gemini';
+import { callGeminiAI, parsePPCTFile, toUserFacingGeminiErrorMessage } from './services/gemini';
 
 // ─── Constants ──────────────────────────────────────────────────────
 const STEPS = [
@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r22';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r24';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -263,6 +263,11 @@ const toUserFacingExamGenerationErrorMessage = (message: string) => {
   }
 
   return message;
+};
+
+const toUserFacingAiPopupMessage = (error: any, fallbackMessage: string) => {
+  const friendlyMessage = toUserFacingGeminiErrorMessage(error);
+  return friendlyMessage || fallbackMessage;
 };
 
 const normalizeAnswerCellValue = (value: string) =>
@@ -2570,9 +2575,18 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Parse PPCT error:', error);
-      const errMsg = error?.message || JSON.stringify(error) || '';
-      const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota');
+      const userMessage = toUserFacingAiPopupMessage(error, 'Khong the phan tich file PPCT o lan nay.');
       Swal.fire({
+        title: 'Loi phan tich',
+        text: userMessage,
+        icon: 'error',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      const isQuota = false;
+      const errMsg = userMessage;
+      if (false) Swal.fire({
         title: isQuota ? 'Hết quota API' : 'Lỗi phân tích',
         html: isQuota
           ? 'API Key đã hết lượt gọi miễn phí.<br><br>💡 <b>Giải pháp:</b><br>• Đợi vài phút rồi thử lại<br>• Hoặc nâng cấp API Key lên gói trả phí'
@@ -2782,7 +2796,7 @@ th { font-weight: bold; }
     } catch (error: any) {
       Swal.fire({
         title: 'Lỗi',
-        text: error.message,
+        text: toUserFacingAiPopupMessage(error, 'Khong the tao ma tran o lan nay.'),
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
@@ -2950,7 +2964,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
     } catch (error: any) {
       Swal.fire({
         title: 'Lỗi tạo đặc tả',
-        text: error.message,
+        text: toUserFacingAiPopupMessage(error, 'Khong the tao bang dac ta o lan nay.'),
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
@@ -3508,7 +3522,7 @@ LẦN THỬ ${attempt}:
     } catch (error: any) {
       setExamHtml('');
       console.error('Generate exam error:', error);
-      const rawMessage = typeof error?.message === 'string' ? error.message : '';
+      const rawMessage = toUserFacingAiPopupMessage(error, 'Khong the tao de thi o lan nay. Vui long thu lai.');
       const safeUserMessage = toUserFacingExamGenerationErrorMessage(rawMessage);
       const userMessage = rawMessage || 'Không thể tạo đề thi ở lần này. Vui lòng thử lại.';
       Swal.fire({

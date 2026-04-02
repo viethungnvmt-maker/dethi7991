@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 // ─── Helpers ────────────────────────────────────────────────────────
 const getApiKey = (): string => localStorage.getItem('gemini_api_key') || '';
 const getModel = (): string => localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
+const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-3-flash-preview'] as const;
 
 const createAI = (apiKey?: string) => {
   const key = apiKey || getApiKey();
@@ -10,10 +11,135 @@ const createAI = (apiKey?: string) => {
   return new GoogleGenAI({ apiKey: key });
 };
 
+const tryParseJsonText = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+const extractGeminiErrorDetails = (error: any) => {
+  const rawMessage = typeof error?.message === 'string' ? error.message : '';
+  const parsedMessage = rawMessage ? tryParseJsonText(rawMessage) : null;
+  const nestedError = parsedMessage && typeof parsedMessage === 'object' && parsedMessage !== null && 'error' in parsedMessage
+    ? (parsedMessage as { error?: Record<string, unknown> }).error
+    : null;
+
+  const code = Number(
+    nestedError?.code
+    ?? error?.status
+    ?? error?.code
+    ?? 0,
+  );
+  const status = String(
+    nestedError?.status
+    ?? error?.status
+    ?? error?.code
+    ?? '',
+  );
+  const message = String(
+    nestedError?.message
+    ?? rawMessage
+    ?? 'Khong the ket noi den Gemini.',
+  );
+
+  return { code, status, message };
+};
+
+const isRetryableGeminiUnavailableError = (error: any) => {
+  const { code, status, message } = extractGeminiErrorDetails(error);
+  const normalized = message.toLowerCase();
+
+  return (
+    code === 503
+    || status.toUpperCase() === 'UNAVAILABLE'
+    || normalized.includes('high demand')
+    || normalized.includes('try again later')
+  );
+};
+
+const buildGeminiModelFallbackChain = (preferredModel: string) => {
+  const normalizedPreferredModel = preferredModel?.trim() || getModel();
+  const orderedModels = [normalizedPreferredModel, ...GEMINI_FALLBACK_MODELS];
+
+  return orderedModels.filter((model, index) => orderedModels.indexOf(model) === index);
+};
+
+const generateContentWithModelFallback = async (
+  ai: GoogleGenAI,
+  preferredModel: string,
+  request: any,
+) => {
+  const modelChain = buildGeminiModelFallbackChain(preferredModel);
+  let lastError: any = null;
+
+  for (let index = 0; index < modelChain.length; index += 1) {
+    const currentModel = modelChain[index];
+
+    try {
+      return await ai.models.generateContent({
+        model: currentModel,
+        ...request,
+      });
+    } catch (error: any) {
+      lastError = error;
+
+      if (!isRetryableGeminiUnavailableError(error) || index === modelChain.length - 1) {
+        throw error;
+      }
+
+      console.warn(`Gemini model ${currentModel} unavailable, retrying with fallback model.`);
+    }
+  }
+
+  throw lastError;
+};
+
+export const toUserFacingGeminiErrorMessage = (error: any) => {
+  const { code, status, message } = extractGeminiErrorDetails(error);
+  const normalized = message.toLowerCase();
+
+  if (
+    code === 503
+    || status.toUpperCase() === 'UNAVAILABLE'
+    || normalized.includes('high demand')
+    || normalized.includes('try again later')
+  ) {
+    return 'Model AI dang qua tai tam thoi. Vui long thu lai sau it phut hoac doi sang Gemini 3 Flash trong phan Cai dat API Key.';
+  }
+
+  if (
+    code === 429
+    || status.toUpperCase() === 'RESOURCE_EXHAUSTED'
+    || normalized.includes('quota')
+    || normalized.includes('rate limit')
+  ) {
+    return 'API Key dang cham gioi han tam thoi. Vui long cho mot luc roi thu lai.';
+  }
+
+  if (
+    code === 401
+    || status.toUpperCase() === 'UNAUTHENTICATED'
+    || normalized.includes('api key not valid')
+    || normalized.includes('invalid api key')
+  ) {
+    return 'API Key khong hop le hoac da het hieu luc. Vui long kiem tra lai trong phan Cai dat API Key.';
+  }
+
+  return message || 'Khong the ket noi den Gemini o lan nay. Vui long thu lai.';
+};
+
 type GeminiCallOptions = {
   temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: string;
+  responseSchema?: unknown;
 };
 
 // ─── Generic AI call ────────────────────────────────────────────────
@@ -25,18 +151,22 @@ export async function callGeminiAI(
 ) {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
-  const { temperature = 0.2, maxOutputTokens = 32768, responseMimeType } = options;
+  const { temperature = 0.2, maxOutputTokens = 32768, responseMimeType, responseSchema } = options;
 
   try {
-    const response = await ai.models.generateContent({
-      model,
+    const response = await generateContentWithModelFallback(ai, model, {
       contents: [{ parts: [{ text: prompt }] }],
-      config: { temperature, maxOutputTokens, ...(responseMimeType ? { responseMimeType } : {}) }
+      config: {
+        temperature,
+        maxOutputTokens,
+        ...(responseMimeType ? { responseMimeType } : {}),
+        ...(responseSchema ? { responseSchema } : {}),
+      }
     });
     return response.text || '';
   } catch (error: any) {
     console.error('Gemini API Error:', error);
-    throw error;
+    throw new Error(toUserFacingGeminiErrorMessage(error));
   }
 }
 
@@ -106,8 +236,7 @@ Lưu ý quan trọng:
   console.log('🔄 Parsing PPCT file, model:', model, 'mimeType:', mimeType);
 
   try {
-    const response = await ai.models.generateContent({
-      model,
+    const response = await generateContentWithModelFallback(ai, model, {
       contents: {
         parts: [
           { inlineData: { mimeType, data: fileBase64 } },
@@ -129,7 +258,7 @@ Lưu ý quan trọng:
     }
   } catch (error: any) {
     console.error('❌ PPCT parse error:', error);
-    throw error;
+    throw new Error(toUserFacingGeminiErrorMessage(error));
   }
 }
 
@@ -181,15 +310,14 @@ th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical
 th { font-weight: bold; }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model,
+    const response = await generateContentWithModelFallback(ai, model, {
       contents: prompt,
       config: { temperature: 0.2 }
     });
     return (response.text || '').replace(/```html/g, '').replace(/```/g, '');
   } catch (error: any) {
     console.error('Matrix generation error:', error);
-    throw error;
+    throw new Error(toUserFacingGeminiErrorMessage(error));
   }
 }
 
