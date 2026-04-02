@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r18';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r20';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -902,6 +902,42 @@ const normalizeRubricItems = (value: unknown): GeneratedRubricItem[] => {
   }).filter((item) => item.content && item.points > 0);
 };
 
+const inferGeneratedQuestionTypeFromShape = (
+  options: string[],
+  statements: string[],
+  answerGuide: string,
+  rubric: GeneratedRubricItem[],
+) => {
+  if (options.length >= 4) {
+    return 'multiple_choice' as GeneratedQuestionType;
+  }
+  if (statements.length >= 4) {
+    return 'true_false' as GeneratedQuestionType;
+  }
+  if (hasMeaningfulAnswerValue(answerGuide) || rubric.length > 0) {
+    return 'essay' as GeneratedQuestionType;
+  }
+  return 'short_answer' as GeneratedQuestionType;
+};
+
+const getNextAvailableQuestionNumber = (
+  usedNumbers: Set<number>,
+  totalQuestions: number,
+  preferredNumber: number,
+) => {
+  if (preferredNumber >= 1 && preferredNumber <= totalQuestions && !usedNumbers.has(preferredNumber)) {
+    return preferredNumber;
+  }
+
+  for (let candidate = 1; candidate <= totalQuestions; candidate += 1) {
+    if (!usedNumbers.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 0;
+};
+
 const hasMeaningfulAnswerValue = (value: string) => {
   const normalized = toCleanString(value);
   if (!normalized) return false;
@@ -959,28 +995,41 @@ const validateStructuredExamPayload = (
   const duplicateQuestions: number[] = [];
   const missingQuestions: number[] = [];
   const invalidQuestions: number[] = [];
+  const usedNumbers = new Set<number>();
+  const hasExpectedRanges = questionRanges.some((range) => range.total > 0);
 
-  rawQuestions.forEach((item) => {
+  rawQuestions.forEach((item, index) => {
     const raw = item as Record<string, unknown>;
-    const number = typeof raw.number === 'number'
+    const parsedNumber = typeof raw.number === 'number'
       ? raw.number
       : Number(String(raw.number ?? '').trim());
+    const number = getNextAvailableQuestionNumber(
+      usedNumbers,
+      totalQuestions,
+      Number.isFinite(parsedNumber) ? parsedNumber : index + 1,
+    );
 
-    if (!Number.isFinite(number) || number <= 0) {
+    if (number <= 0) {
+      if (Number.isFinite(parsedNumber) && parsedNumber > 0) {
+        duplicateQuestions.push(parsedNumber);
+      }
       return;
     }
 
-    if (normalizedQuestions.has(number)) {
-      duplicateQuestions.push(number);
-      return;
+    if (Number.isFinite(parsedNumber) && parsedNumber > 0 && (parsedNumber < 1 || parsedNumber > totalQuestions || usedNumbers.has(parsedNumber))) {
+      duplicateQuestions.push(parsedNumber);
     }
 
-    const type = normalizeGeneratedQuestionType(raw.type ?? raw.questionType ?? raw.kind) || getExpectedQuestionType(number, questionRanges);
     const prompt = normalizeStructuredTextValue(raw.prompt ?? raw.content ?? raw.question ?? raw.text ?? raw.stem ?? raw.title ?? raw.body);
     const options = normalizeOrderedStringArray(raw.options ?? raw.choices ?? raw.answers ?? raw.answerOptions ?? raw.phuongAn, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']).slice(0, 4);
     const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
-    const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
+    const provisionalAnswerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan);
     const rubric = normalizeRubricItems(raw.rubric);
+    const inferredType = inferGeneratedQuestionTypeFromShape(options, statements, provisionalAnswerGuide, rubric);
+    const type = normalizeGeneratedQuestionType(raw.type ?? raw.questionType ?? raw.kind)
+      || getExpectedQuestionType(number, questionRanges)
+      || inferredType;
+    const answerGuide = provisionalAnswerGuide || normalizeStructuredTextValue(type === 'essay' ? raw.answer : '');
     const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
@@ -1002,6 +1051,7 @@ const validateStructuredExamPayload = (
       answerGuide,
       rubric,
     });
+    usedNumbers.add(number);
   });
 
   const validQuestions: GeneratedExamQuestion[] = [];
@@ -1014,7 +1064,9 @@ const validateStructuredExamPayload = (
       continue;
     }
 
-    const expectedType = getExpectedQuestionType(questionNumber, questionRanges);
+    const expectedType = hasExpectedRanges
+      ? getExpectedQuestionType(questionNumber, questionRanges)
+      : question.type;
 
     if (!expectedType || question.type !== expectedType) {
       invalidQuestions.push(questionNumber);
@@ -1798,6 +1850,22 @@ const buildExamHtmlFromStructuredQuestions = (
         </section>
       `;
     }).join('');
+  const fallbackSectionsHtml = QUESTION_TYPE_SEQUENCE
+    .map((type, index) => ({ type, roman: ROMAN_NUMERALS[index] || `${index + 1}` }))
+    .map((item) => {
+      const sectionQuestions = questions.filter((question) => question.type === item.type);
+      if (sectionQuestions.length === 0) {
+        return '';
+      }
+
+      return `
+        <section class="exam-section">
+          <h4>PHẦN ${item.roman}. ${QUESTION_SECTION_TITLES[item.type]}</h4>
+          ${sectionQuestions.map((question) => renderQuestionHtml(question)).join('')}
+        </section>
+      `;
+    }).join('');
+  const finalSectionsHtml = sectionsHtml || fallbackSectionsHtml;
 
   return `<!DOCTYPE html>
 <html>
@@ -1831,7 +1899,7 @@ const buildExamHtmlFromStructuredQuestions = (
     <p><strong>Thời gian làm bài:</strong> ${duration} phút</p>
     <p><strong>Họ và tên:</strong> ............................................. <strong>SBD:</strong> ............................</p>
   </div>
-  ${sectionsHtml}
+  ${finalSectionsHtml}
   <h3>ĐÁP ÁN</h3>
   ${buildAnswerTablesHtml(questions)}
   ${buildScoringGuideHtml(questions)}
@@ -2063,6 +2131,60 @@ const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
     return `- ${row.label}: ${total} câu, đánh số từ Câu ${range.start} đến Câu ${range.end}. Chi tiết mức độ: ${describeRowConfig(row)}.`;
   }).join('\n');
 };
+
+const sumLessonCountsByQuestionType = (
+  lessonRequirements: LessonMatrixRequirement[],
+  questionType: GeneratedQuestionType,
+) =>
+  lessonRequirements.reduce((acc, lesson) => {
+    const levels = lesson.countsByType[questionType];
+    STRUCTURE_LEVELS.forEach(({ key }) => {
+      acc[key] += levels[key];
+    });
+    return acc;
+  }, createEmptyLevelCountMap());
+
+const buildExamQuestionRangesFromLessonRequirements = (
+  lessonRequirements: LessonMatrixRequirement[],
+) => {
+  let currentQuestion = 1;
+
+  return QUESTION_TYPE_SEQUENCE.map((questionType, index) => {
+    const levels = sumLessonCountsByQuestionType(lessonRequirements, questionType);
+    const total = sumLevelCountMap(levels);
+    const label = DEFAULT_EXAM_STRUCTURE[index]?.label || QUESTION_TYPE_PROMPT_LABELS[questionType];
+
+    if (total <= 0) {
+      return { label, total: 0, start: 0, end: 0 };
+    }
+
+    const range = {
+      label,
+      total,
+      start: currentQuestion,
+      end: currentQuestion + total - 1,
+    };
+
+    currentQuestion += total;
+    return range;
+  });
+};
+
+const buildExamTypeRequirementsFromLessonRequirements = (
+  lessonRequirements: LessonMatrixRequirement[],
+  questionRanges: QuestionRange[],
+) => QUESTION_TYPE_SEQUENCE.map((questionType, index) => {
+  const levels = sumLessonCountsByQuestionType(lessonRequirements, questionType);
+  const total = sumLevelCountMap(levels);
+  const label = DEFAULT_EXAM_STRUCTURE[index]?.label || QUESTION_TYPE_PROMPT_LABELS[questionType];
+  const range = questionRanges[index];
+
+  if (!range || total <= 0) {
+    return `- ${label}: 0 câu, phải bỏ hoàn toàn dạng này khỏi đề.`;
+  }
+
+  return `- ${label}: ${total} câu, đánh số từ Câu ${range.start} đến Câu ${range.end}. Chi tiết mức độ: ${formatLessonLevelBreakdown(levels)}.`;
+}).join('\n');
 
 const buildQuestionChecklist = (totalQuestions: number) =>
   Array.from({ length: totalQuestions }, (_, index) => `Câu ${index + 1}`).join(', ');
@@ -2798,15 +2920,15 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         extractExpectedQuestionCountFromHtml(specsHtml),
         extractExpectedQuestionCountFromHtml(matrixHtml),
       );
-      const effectiveQuestionCount = configuredQuestionCount > 0 ? configuredQuestionCount : fallbackQuestionCount;
+      let effectiveQuestionCount = configuredQuestionCount > 0 ? configuredQuestionCount : fallbackQuestionCount;
 
       if (effectiveQuestionCount <= 0) {
         throw new Error('Không xác định được tổng số câu từ cấu hình hiện tại hoặc file đặc tả. Vui lòng nhập cấu hình đề hoặc upload đặc tả/ma trận có đủ dòng tổng số câu.');
       }
 
-      const examQuestionRanges = configuredQuestionCount > 0 ? buildExamQuestionRanges(examStructure) : [];
+      let examQuestionRanges = configuredQuestionCount > 0 ? buildExamQuestionRanges(examStructure) : [];
       const compactSpecsHtml = compactHtmlForPrompt(specsHtml);
-      const activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
+      let activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
       const selectedLessonItems: SelectedLessonSummary[] = chapters.flatMap((chapter) =>
         chapter.lessons
           .filter((lesson) => selectedLessons.has(lesson.id))
@@ -2815,12 +2937,24 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const includeEssay = configuredQuestionCount > 0
         ? calculateRowTotals(examStructure[3]).count > 0
         : /tu luan|tự luận/i.test(htmlToPlainText(specsHtml));
-      const examTypeRequirements = configuredQuestionCount > 0
+      let examTypeRequirements = configuredQuestionCount > 0
         ? buildExamTypeRequirements(examStructure)
         : '- Follow the exact question distribution that already appears in the uploaded specification table.';
-      const questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
+      let questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
       const lessonBreakdownPrompt = buildLessonBreakdownFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
       const lessonRequirements = extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
+      if (configuredQuestionCount <= 0) {
+        const derivedQuestionRanges = buildExamQuestionRangesFromLessonRequirements(lessonRequirements);
+        const derivedQuestionCount = derivedQuestionRanges.reduce((sum, item) => sum + item.total, 0);
+
+        if (derivedQuestionCount > 0) {
+          examQuestionRanges = derivedQuestionRanges;
+          activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
+          effectiveQuestionCount = derivedQuestionCount;
+          examTypeRequirements = buildExamTypeRequirementsFromLessonRequirements(lessonRequirements, examQuestionRanges);
+          questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
+        }
+      }
       const assignedLessonRequirements = assignQuestionNumbersToLessonRequirements(lessonRequirements, examQuestionRanges);
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
