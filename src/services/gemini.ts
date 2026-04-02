@@ -13,6 +13,7 @@ const createAI = (apiKey?: string) => {
 type GeminiCallOptions = {
   temperature?: number;
   maxOutputTokens?: number;
+  responseMimeType?: string;
 };
 
 // ─── Generic AI call ────────────────────────────────────────────────
@@ -24,13 +25,13 @@ export async function callGeminiAI(
 ) {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
-  const { temperature = 0.2, maxOutputTokens = 32768 } = options;
+  const { temperature = 0.2, maxOutputTokens = 32768, responseMimeType } = options;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: [{ parts: [{ text: prompt }] }],
-      config: { temperature, maxOutputTokens }
+      config: { temperature, maxOutputTokens, ...(responseMimeType ? { responseMimeType } : {}) }
     });
     return response.text || '';
   } catch (error: any) {

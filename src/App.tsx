@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r3';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r4';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -397,6 +397,33 @@ interface QuestionContentValidationResult {
   summary: string;
 }
 
+type GeneratedQuestionType = 'multiple_choice' | 'true_false' | 'short_answer' | 'essay';
+
+interface GeneratedRubricItem {
+  content: string;
+  points: number;
+}
+
+interface GeneratedExamQuestion {
+  number: number;
+  type: GeneratedQuestionType;
+  prompt: string;
+  options?: string[];
+  statements?: string[];
+  answer?: string | string[];
+  answerGuide?: string;
+  rubric?: GeneratedRubricItem[];
+}
+
+interface StructuredExamValidationResult {
+  isComplete: boolean;
+  presentQuestionCount: number;
+  missingQuestions: number[];
+  invalidQuestions: number[];
+  summary: string;
+  questions: GeneratedExamQuestion[];
+}
+
 const stripQuestionLabel = (value: string) =>
   value.replace(/^\s*Câu\s*\d+\s*[:.)-]?\s*/i, '').trim();
 
@@ -551,6 +578,443 @@ const validateQuestionContentCoverage = (
     invalidQuestions,
     summary: summaryParts.join('; ') || 'đủ nội dung cho tất cả câu',
   };
+};
+
+const QUESTION_TYPE_SEQUENCE: GeneratedQuestionType[] = [
+  'multiple_choice',
+  'true_false',
+  'short_answer',
+  'essay',
+];
+
+const QUESTION_SECTION_TITLES: Record<GeneratedQuestionType, string> = {
+  multiple_choice: 'TRẮC NGHIỆM NHIỀU LỰA CHỌN',
+  true_false: 'CÂU ĐÚNG/SAI',
+  short_answer: 'CÂU TRẢ LỜI NGẮN',
+  essay: 'TỰ LUẬN',
+};
+
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+
+const toCleanString = (value: unknown) =>
+  typeof value === 'string'
+    ? value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+
+const sanitizeGeneratedJson = (value: string) =>
+  value.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+const extractJsonDocumentFromResponse = (responseText: string) => {
+  const sanitized = sanitizeGeneratedJson(responseText);
+
+  try {
+    JSON.parse(sanitized);
+    return sanitized;
+  } catch {
+    const start = sanitized.indexOf('{');
+    const end = sanitized.lastIndexOf('}');
+
+    if (start >= 0 && end > start) {
+      const candidate = sanitized.slice(start, end + 1).trim();
+      JSON.parse(candidate);
+      return candidate;
+    }
+
+    throw new Error('AI không trả về JSON hợp lệ.');
+  }
+};
+
+const parseGeneratedExamPayload = (responseText: string) => {
+  const jsonText = extractJsonDocumentFromResponse(responseText);
+  return JSON.parse(jsonText) as { questions?: unknown[] };
+};
+
+const getExpectedQuestionType = (
+  questionNumber: number,
+  questionRanges: QuestionRange[],
+): GeneratedQuestionType | null => {
+  for (let index = 0; index < Math.min(questionRanges.length, QUESTION_TYPE_SEQUENCE.length); index += 1) {
+    const range = questionRanges[index];
+    if (range.total > 0 && questionNumber >= range.start && questionNumber <= range.end) {
+      return QUESTION_TYPE_SEQUENCE[index];
+    }
+  }
+
+  return null;
+};
+
+const normalizeGeneratedQuestionType = (value: unknown): GeneratedQuestionType | null => {
+  const normalized = normalizeAsciiText(typeof value === 'string' ? value : '');
+
+  if (['multiple_choice', 'multiple choice', 'multiple-choice', 'mcq', 'trac nghiem', 'trac nghiem 1 dap an', 'trac nghiem 1 dap an dung', '1 lua chon'].includes(normalized)) {
+    return 'multiple_choice';
+  }
+  if (['true_false', 'true false', 'true-false', 'dung sai', 'dung/sai', 'dung_sai', 'truefalse'].includes(normalized)) {
+    return 'true_false';
+  }
+  if (['short_answer', 'short answer', 'short-answer', 'shortanswer', 'tra loi ngan', 'dien khuyet', 'tra loi ngan/dien khuyet', 'tra loi ngan dien khuyet'].includes(normalized)) {
+    return 'short_answer';
+  }
+  if (['essay', 'tu luan'].includes(normalized)) {
+    return 'essay';
+  }
+
+  return null;
+};
+
+const normalizeMultipleChoiceAnswer = (value: unknown) => {
+  const normalized = toCleanString(value).toUpperCase();
+  const match = normalized.match(/[ABCD]/);
+  return match ? match[0] : '';
+};
+
+const normalizeTrueFalseAnswerToken = (value: unknown) => {
+  const normalized = normalizeAsciiText(typeof value === 'string' ? value : String(value ?? ''));
+
+  if (['d', 'dung', 'true', 't'].includes(normalized)) return 'Đ';
+  if (['s', 'sai', 'false', 'f'].includes(normalized)) return 'S';
+  return '';
+};
+
+const normalizeTrueFalseAnswers = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeTrueFalseAnswerToken(item))
+      .filter(Boolean);
+  }
+
+  const text = toCleanString(value);
+  if (!text) return [];
+
+  return text
+    .split(/[,\-|/;]+|\s{2,}/)
+    .map((item) => normalizeTrueFalseAnswerToken(item))
+    .filter(Boolean);
+};
+
+const normalizeRubricItems = (value: unknown): GeneratedRubricItem[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value.map((item) => {
+    const raw = item as Record<string, unknown>;
+    const content = toCleanString(raw.content ?? raw.text ?? raw.criterion);
+    const pointsText = typeof raw.points === 'number' ? raw.points : Number(String(raw.points ?? '').replace(',', '.'));
+    const points = Number.isFinite(pointsText) ? Math.max(0, pointsText) : 0;
+
+    return { content, points };
+  }).filter((item) => item.content && item.points > 0);
+};
+
+const hasMeaningfulAnswerValue = (value: string) => {
+  const normalized = toCleanString(value);
+  if (!normalized) return false;
+  return !/^(?:[.·…_\-\s]+)$/.test(normalized);
+};
+
+const validateStructuredExamPayload = (
+  responseText: string,
+  totalQuestions: number,
+  questionRanges: QuestionRange[],
+): StructuredExamValidationResult => {
+  const payload = parseGeneratedExamPayload(responseText);
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  const normalizedQuestions = new Map<number, GeneratedExamQuestion>();
+  const duplicateQuestions: number[] = [];
+  const missingQuestions: number[] = [];
+  const invalidQuestions: number[] = [];
+
+  rawQuestions.forEach((item) => {
+    const raw = item as Record<string, unknown>;
+    const number = typeof raw.number === 'number'
+      ? raw.number
+      : Number(String(raw.number ?? '').trim());
+
+    if (!Number.isFinite(number) || number <= 0) {
+      return;
+    }
+
+    if (normalizedQuestions.has(number)) {
+      duplicateQuestions.push(number);
+      return;
+    }
+
+    const type = normalizeGeneratedQuestionType(raw.type);
+    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
+    const options = Array.isArray(raw.options) ? raw.options.map((option) => toCleanString(option)).filter(Boolean) : [];
+    const statements = Array.isArray(raw.statements) ? raw.statements.map((statement) => toCleanString(statement)).filter(Boolean) : [];
+    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const rubric = normalizeRubricItems(raw.rubric);
+
+    let answer: string | string[] | undefined;
+    if (type === 'multiple_choice') {
+      answer = normalizeMultipleChoiceAnswer(raw.answer);
+    } else if (type === 'true_false') {
+      answer = normalizeTrueFalseAnswers(raw.answer);
+    } else {
+      answer = toCleanString(raw.answer);
+    }
+
+    normalizedQuestions.set(number, {
+      number,
+      type: type || 'short_answer',
+      prompt,
+      options,
+      statements,
+      answer,
+      answerGuide,
+      rubric,
+    });
+  });
+
+  const validQuestions: GeneratedExamQuestion[] = [];
+
+  for (let questionNumber = 1; questionNumber <= totalQuestions; questionNumber += 1) {
+    const question = normalizedQuestions.get(questionNumber);
+
+    if (!question) {
+      missingQuestions.push(questionNumber);
+      continue;
+    }
+
+    const expectedType = getExpectedQuestionType(questionNumber, questionRanges);
+
+    if (!expectedType || question.type !== expectedType) {
+      invalidQuestions.push(questionNumber);
+      continue;
+    }
+
+    let isValidQuestion = false;
+
+    if (question.type === 'multiple_choice') {
+      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
+        && Array.isArray(question.options)
+        && question.options.length === 4
+        && question.options.every((option) => hasMeaningfulAnswerValue(option))
+        && typeof question.answer === 'string'
+        && /^[ABCD]$/.test(question.answer);
+    } else if (question.type === 'true_false') {
+      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
+        && Array.isArray(question.statements)
+        && question.statements.length === 4
+        && question.statements.every((statement) => hasMeaningfulQuestionText(statement, 3))
+        && Array.isArray(question.answer)
+        && question.answer.length === 4
+        && question.answer.every((token) => token === 'Đ' || token === 'S');
+    } else if (question.type === 'short_answer') {
+      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
+        && typeof question.answer === 'string'
+        && hasMeaningfulAnswerValue(question.answer);
+    } else {
+      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
+        && (
+          hasMeaningfulAnswerValue(question.answerGuide || '')
+          || (Array.isArray(question.rubric) && question.rubric.length > 0)
+        );
+    }
+
+    if (!isValidQuestion) {
+      invalidQuestions.push(questionNumber);
+      continue;
+    }
+
+    validQuestions.push(question);
+  }
+
+  const summaryParts: string[] = [];
+  if (missingQuestions.length > 0) {
+    summaryParts.push(`thiếu câu ${formatQuestionNumberList(missingQuestions)}`);
+  }
+  if (invalidQuestions.length > 0) {
+    summaryParts.push(`sai dạng hoặc thiếu dữ liệu ở câu ${formatQuestionNumberList(invalidQuestions)}`);
+  }
+  if (duplicateQuestions.length > 0) {
+    summaryParts.push(`trùng số câu ${formatQuestionNumberList(duplicateQuestions)}`);
+  }
+
+  return {
+    isComplete: missingQuestions.length === 0 && invalidQuestions.length === 0 && duplicateQuestions.length === 0 && validQuestions.length === totalQuestions,
+    presentQuestionCount: validQuestions.length,
+    missingQuestions,
+    invalidQuestions,
+    summary: summaryParts.join('; ') || 'đủ dữ liệu cấu trúc cho tất cả câu',
+    questions: validQuestions.sort((a, b) => a.number - b.number),
+  };
+};
+
+const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
+  if (question.type === 'multiple_choice') {
+    return typeof question.answer === 'string' ? question.answer : '';
+  }
+  if (question.type === 'true_false') {
+    return Array.isArray(question.answer) ? question.answer.join(', ') : '';
+  }
+  if (question.type === 'short_answer') {
+    return typeof question.answer === 'string' ? question.answer : '';
+  }
+  return 'TL';
+};
+
+const buildAnswerTablesHtml = (questions: GeneratedExamQuestion[]) => {
+  const chunks: GeneratedExamQuestion[][] = [];
+
+  for (let index = 0; index < questions.length; index += 10) {
+    chunks.push(questions.slice(index, index + 10));
+  }
+
+  return chunks.map((chunk) => `
+    <table class="answer-table">
+      <tr>
+        <th>Câu</th>
+        ${chunk.map((question) => `<th>${question.number}</th>`).join('')}
+      </tr>
+      <tr>
+        <th>Đáp án</th>
+        ${chunk.map((question) => `<td>${escapeHtml(renderAnswerCellValue(question))}</td>`).join('')}
+      </tr>
+    </table>
+  `).join('<div class="answer-table-spacer"></div>');
+};
+
+const renderQuestionHtml = (question: GeneratedExamQuestion) => {
+  if (question.type === 'multiple_choice') {
+    return `
+      <div class="question-block">
+        <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+        <div class="options">
+          ${question.options?.map((option, index) => `<div class="option-item">${String.fromCharCode(65 + index)}. ${escapeHtml(option)}</div>`).join('') || ''}
+        </div>
+      </div>
+    `;
+  }
+
+  if (question.type === 'true_false') {
+    return `
+      <div class="question-block">
+        <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+        <div class="statements">
+          ${question.statements?.map((statement, index) => `<div class="statement-item">${String.fromCharCode(97 + index)}) ${escapeHtml(statement)}</div>`).join('') || ''}
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="question-block">
+      <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+    </div>
+  `;
+};
+
+const buildScoringGuideHtml = (questions: GeneratedExamQuestion[]) => {
+  const shortAnswerGuides = questions.filter((question) => question.type === 'short_answer');
+  const essayGuides = questions.filter((question) => question.type === 'essay');
+
+  if (shortAnswerGuides.length === 0 && essayGuides.length === 0) {
+    return '';
+  }
+
+  const shortAnswerHtml = shortAnswerGuides.length > 0
+    ? `
+      <div class="guide-group">
+        <h4>Đáp án câu trả lời ngắn</h4>
+        ${shortAnswerGuides.map((question) => `<p><strong>Câu ${question.number}:</strong> ${escapeHtml(typeof question.answer === 'string' ? question.answer : '')}</p>`).join('')}
+      </div>
+    `
+    : '';
+
+  const essayHtml = essayGuides.length > 0
+    ? `
+      <div class="guide-group">
+        <h4>Hướng dẫn chấm tự luận</h4>
+        ${essayGuides.map((question) => `
+          <div class="essay-guide">
+            <p><strong>Câu ${question.number}.</strong> ${escapeHtml(question.answerGuide || 'Xem rubric bên dưới.')}</p>
+            ${question.rubric && question.rubric.length > 0 ? `
+              <table class="rubric-table">
+                <tr>
+                  <th>Nội dung</th>
+                  <th>Điểm</th>
+                </tr>
+                ${question.rubric.map((item) => `
+                  <tr>
+                    <td class="text-left">${escapeHtml(item.content)}</td>
+                    <td>${formatScore(item.points)}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `
+    : '';
+
+  return `
+    <h3>HƯỚNG DẪN CHẤM</h3>
+    ${shortAnswerHtml}
+    ${essayHtml}
+  `;
+};
+
+const buildExamHtmlFromStructuredQuestions = (
+  questions: GeneratedExamQuestion[],
+  subject: string,
+  examType: string,
+  duration: number,
+  questionRanges: QuestionRange[],
+) => {
+  const sectionsHtml = questionRanges
+    .map((range, index) => ({ range, type: QUESTION_TYPE_SEQUENCE[index], roman: ROMAN_NUMERALS[index] || `${index + 1}` }))
+    .filter((item) => item.range.total > 0)
+    .map((item) => {
+      const sectionQuestions = questions.filter((question) => question.number >= item.range.start && question.number <= item.range.end);
+
+      return `
+        <section class="exam-section">
+          <h4>PHẦN ${item.roman}. ${QUESTION_SECTION_TITLES[item.type]}</h4>
+          ${sectionQuestions.map((question) => renderQuestionHtml(question)).join('')}
+        </section>
+      `;
+    }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Đề kiểm tra ${escapeHtml(examType)} - ${escapeHtml(subject)}</title>
+  <style>
+    body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.5; color: #000; margin: 20px; }
+    h2, h3, h4 { text-align: center; font-weight: bold; margin: 12px 0; }
+    .exam-meta { margin-bottom: 12px; }
+    .exam-meta p { margin: 4px 0; }
+    .question-block { margin-bottom: 12px; }
+    .question-number { font-weight: bold; }
+    .options, .statements { margin-left: 22px; }
+    .option-item, .statement-item { margin-bottom: 4px; }
+    .exam-section { margin-bottom: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid black; padding: 5px; text-align: center; vertical-align: top; word-break: break-word; }
+    th { font-weight: bold; }
+    .text-left { text-align: left; }
+    .answer-table-spacer { height: 12px; }
+    .guide-group { margin-top: 12px; }
+    .essay-guide { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h2>ĐỀ KIỂM TRA ${escapeHtml(examType.toUpperCase())} - ${escapeHtml(subject.toUpperCase())}</h2>
+  <div class="exam-meta">
+    <p><strong>NĂM HỌC 20... - 20...</strong></p>
+    <p><strong>TRƯỜNG THPT .......................</strong></p>
+    <p><strong>Thời gian làm bài:</strong> ${duration} phút</p>
+    <p><strong>Họ và tên:</strong> ............................................. <strong>SBD:</strong> ............................</p>
+  </div>
+  ${sectionsHtml}
+  <h3>ĐÁP ÁN</h3>
+  ${buildAnswerTablesHtml(questions)}
+  ${buildScoringGuideHtml(questions)}
+</body>
+</html>`;
 };
 
 const isQuarterStep = (value: number) => Math.abs(value * 4 - Math.round(value * 4)) < 1e-9;
@@ -1466,6 +1930,133 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
+
+      const structuredBasePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy tạo DỮ LIỆU CÂU HỎI CHUẨN HÓA cho đề kiểm tra.
+
+BẢNG ĐẶC TẢ:
+${compactSpecsHtml}
+
+CẤU TRÚC BẮT BUỘC:
+- Tổng số câu toàn đề: ${effectiveQuestionCount}
+${questionRangePrompt}
+
+PHÂN BỔ CHI TIẾT TỪNG DẠNG:
+${examTypeRequirements}
+
+${lessonBreakdownPrompt ? `PHÂN BỔ CHI TIẾT THEO TỪNG BÀI:
+${lessonBreakdownPrompt}
+
+Nếu một bài không xuất hiện trong danh sách trên thì KHÔNG được tạo câu hỏi từ bài đó.
+` : ''}
+
+CHỈ TRẢ VỀ JSON OBJECT, KHÔNG markdown, KHÔNG HTML, KHÔNG giải thích.
+Mỗi câu phải là câu thật, có nội dung hoàn chỉnh, không được placeholder, không được dấu "...".
+Không được bỏ sót câu trắc nghiệm 1 đáp án và không được bỏ sót câu trả lời ngắn.
+
+Schema bắt buộc:
+{
+  "questions": [
+    {
+      "number": 1,
+      "type": "multiple_choice",
+      "prompt": "Nội dung câu hỏi",
+      "options": ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
+      "answer": "A"
+    },
+    {
+      "number": 8,
+      "type": "true_false",
+      "prompt": "Đề dẫn",
+      "statements": ["Mệnh đề a", "Mệnh đề b", "Mệnh đề c", "Mệnh đề d"],
+      "answer": ["Đ", "S", "Đ", "S"]
+    },
+    {
+      "number": 12,
+      "type": "short_answer",
+      "prompt": "Nội dung câu trả lời ngắn/điền khuyết",
+      "answer": "Đáp án ngắn"
+    },
+    {
+      "number": 15,
+      "type": "essay",
+      "prompt": "Nội dung câu tự luận",
+      "answerGuide": "Gợi ý đáp án",
+      "rubric": [
+        { "content": "Ý 1", "points": 0.5 },
+        { "content": "Ý 2", "points": 0.5 }
+      ]
+    }
+  ]
+}
+
+QUY TẮC JSON:
+- Phải có đúng ${effectiveQuestionCount} phần tử trong mảng "questions".
+- Số thứ tự phải chạy liên tục và đầy đủ: ${questionChecklist}.
+- "type" chỉ được dùng một trong 4 giá trị: "multiple_choice", "true_false", "short_answer", "essay".
+- Đúng dải số câu nào thì phải dùng đúng type của dải đó, không được đổi.
+- Với dải trắc nghiệm 1 đáp án: mỗi câu bắt buộc có đủ 4 lựa chọn A, B, C, D.
+- Với dải đúng/sai: mỗi câu bắt buộc có đủ 4 mệnh đề a, b, c, d và 4 đáp án tương ứng.
+- Với dải trả lời ngắn: mỗi câu bắt buộc có prompt đầy đủ và answer ngắn chính xác.
+- Với dải tự luận: phải có answerGuide hoặc rubric.
+- Mọi chuỗi phải bằng tiếng Việt và không được rỗng.`;
+
+      let structuredGeneratedQuestionCount = 0;
+      let structuredQuestionFeedback = '';
+      let structuredQuestionContentFeedback = '';
+      let structuredAnswerKeyFeedback = '';
+
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const retryPrompt = attempt === 1
+          ? structuredBasePrompt
+          : `${structuredBasePrompt}
+
+LẦN THỬ ${attempt}:
+- Ở lần trước bạn mới tạo được ${structuredGeneratedQuestionCount}/${effectiveQuestionCount} câu hợp lệ.
+- Dữ liệu câu hỏi lần trước: ${structuredQuestionFeedback || 'chưa đủ dữ liệu để đánh giá'}.
+- Phần thân đề lần trước: ${structuredQuestionContentFeedback || 'chưa đủ dữ liệu để đánh giá'}.
+- Bảng đáp án lần trước: ${structuredAnswerKeyFeedback || 'chưa đủ dữ liệu để đánh giá'}.
+- Hãy tạo lại TOÀN BỘ mảng "questions" từ đầu, không sửa chắp vá.
+- Tuyệt đối không bỏ sót câu trắc nghiệm 1 đáp án và câu trả lời ngắn.`;
+
+        try {
+          const result = await callGeminiAI(retryPrompt, apiKey, model, {
+            temperature: attempt === 1 ? 0.1 : 0,
+            maxOutputTokens: 32768,
+            responseMimeType: 'application/json',
+          });
+
+          const structuredValidation = validateStructuredExamPayload(result, effectiveQuestionCount, examQuestionRanges);
+          structuredGeneratedQuestionCount = structuredValidation.presentQuestionCount;
+          structuredQuestionFeedback = structuredValidation.summary;
+
+          if (!structuredValidation.isComplete) {
+            continue;
+          }
+
+          const cleanHtml = buildExamHtmlFromStructuredQuestions(
+            structuredValidation.questions,
+            monHoc,
+            loaiKiemTra,
+            thoiGian,
+            examQuestionRanges,
+          );
+
+          const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+          structuredQuestionContentFeedback = questionContentValidation.summary;
+          const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+          structuredAnswerKeyFeedback = answerKeyValidation.summary;
+
+          if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
+            setExamHtml(cleanHtml);
+            setCurrentStep(4);
+            return;
+          }
+        } catch (attemptError: any) {
+          structuredQuestionFeedback = attemptError?.message || 'AI không trả về JSON hợp lệ.';
+        }
+      }
+
+      throw new Error(`Đề thi AI chưa đạt sau 3 lần thử. Dữ liệu câu hỏi gần nhất: ${structuredQuestionFeedback}. Phần thân đề gần nhất: ${structuredQuestionContentFeedback}. Bảng đáp án gần nhất: ${structuredAnswerKeyFeedback}. Vui lòng bấm tạo lại.`);
 
       const basePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
