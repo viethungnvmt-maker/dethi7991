@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r21';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r22';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -2218,7 +2218,7 @@ const extractLessonRequirementsFromMatrix = (
   selectedLessonItems: SelectedLessonSummary[],
   includeEssay: boolean,
 ): LessonMatrixRequirement[] => {
-  if (!matrixHtml || selectedLessonItems.length === 0 || typeof DOMParser === 'undefined') {
+  if (!matrixHtml || typeof DOMParser === 'undefined') {
     return [];
   }
 
@@ -2228,6 +2228,79 @@ const extractLessonRequirementsFromMatrix = (
   const requiredValueCells = activeTypes.length * STRUCTURE_LEVELS.length;
   const lessonRequirements: LessonMatrixRequirement[] = [];
   let lessonCursor = 0;
+
+  const createCountsByType = () => ({
+    multiple_choice: createEmptyLevelCountMap(),
+    true_false: createEmptyLevelCountMap(),
+    short_answer: createEmptyLevelCountMap(),
+    essay: createEmptyLevelCountMap(),
+  } satisfies Record<GeneratedQuestionType, LevelCountMap>);
+
+  const fillCountsByType = (valueCells: string[]) => {
+    const countsByType = createCountsByType();
+
+    activeTypes.forEach((questionType, typeIndex) => {
+      const levelCells = valueCells.slice(
+        typeIndex * STRUCTURE_LEVELS.length,
+        (typeIndex + 1) * STRUCTURE_LEVELS.length,
+      );
+
+      STRUCTURE_LEVELS.forEach(({ key }, levelIndex) => {
+        countsByType[questionType][key] = extractIntegerFromCell(levelCells[levelIndex] || '');
+      });
+    });
+
+    return countsByType;
+  };
+
+  const isSummaryLikeText = (value: string) => {
+    const normalized = normalizeTextForMatch(value);
+    return /^(tt|chuong|chu de|noi dung|dvkt|don vi kien thuc|yeu cau can dat|muc do danh gia|tong so cau|tong so diem|ti le|nam hoc|ma tran|dac ta|nhan biet|thong hieu|van dung|van dung cao)$/.test(normalized)
+      || normalized.includes('tong so cau')
+      || normalized.includes('tong so diem')
+      || normalized.includes('ti le');
+  };
+
+  const extractGenericLessonRequirements = () => {
+    const genericRequirements: LessonMatrixRequirement[] = [];
+    const seenLessonNames = new Set<string>();
+
+    rows.forEach((row) => {
+      const cellTexts = Array.from(row.querySelectorAll('td,th'))
+        .map((cell) => (cell.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+
+      if (cellTexts.length < requiredValueCells + 1) return;
+
+      const valueCells = cellTexts.slice(-requiredValueCells);
+      const hasAnyCount = valueCells.some((cellText) => extractIntegerFromCell(cellText) > 0);
+      if (!hasAnyCount) return;
+
+      const lessonCellIndex = cellTexts.length - requiredValueCells - 1;
+      const lessonName = cellTexts[lessonCellIndex] || '';
+      const normalizedLessonName = normalizeTextForMatch(lessonName);
+
+      if (!lessonName || !normalizedLessonName || isSummaryLikeText(lessonName) || seenLessonNames.has(normalizedLessonName)) {
+        return;
+      }
+
+      const chapterCandidate = lessonCellIndex > 0 ? cellTexts[lessonCellIndex - 1] || '' : '';
+      const chapterName = isSummaryLikeText(chapterCandidate) ? '' : chapterCandidate;
+
+      genericRequirements.push({
+        chapterName,
+        lessonName,
+        countsByType: fillCountsByType(valueCells),
+      });
+      seenLessonNames.add(normalizedLessonName);
+    });
+
+    return genericRequirements;
+  };
+
+  if (selectedLessonItems.length === 0) {
+    return extractGenericLessonRequirements();
+  }
 
   rows.forEach((row) => {
     if (lessonCursor >= selectedLessonItems.length) return;
@@ -2253,34 +2326,16 @@ const extractLessonRequirementsFromMatrix = (
     const valueCells = cellTexts.slice(lessonCellIndex + 1, lessonCellIndex + 1 + requiredValueCells);
     if (valueCells.length < requiredValueCells) return;
 
-    const countsByType = {
-      multiple_choice: createEmptyLevelCountMap(),
-      true_false: createEmptyLevelCountMap(),
-      short_answer: createEmptyLevelCountMap(),
-      essay: createEmptyLevelCountMap(),
-    } satisfies Record<GeneratedQuestionType, LevelCountMap>;
-
-    activeTypes.forEach((questionType, typeIndex) => {
-      const levelCells = valueCells.slice(
-        typeIndex * STRUCTURE_LEVELS.length,
-        (typeIndex + 1) * STRUCTURE_LEVELS.length,
-      );
-
-      STRUCTURE_LEVELS.forEach(({ key }, levelIndex) => {
-        countsByType[questionType][key] = extractIntegerFromCell(levelCells[levelIndex] || '');
-      });
-    });
-
     lessonRequirements.push({
       chapterName: currentLesson.chapterName,
       lessonName: currentLesson.lessonName,
-      countsByType,
+      countsByType: fillCountsByType(valueCells),
     });
 
     lessonCursor += 1;
   });
 
-  return lessonRequirements;
+  return lessonRequirements.length > 0 ? lessonRequirements : extractGenericLessonRequirements();
 };
 
 const assignQuestionNumbersToLessonRequirements = (
