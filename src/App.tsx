@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r13';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r14';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -1405,6 +1405,121 @@ Format câu hỏi:
 CHỈ trả về HTML thuần, KHÔNG markdown code block, KHÔNG giải thích thêm.`;
 };
 
+const buildSinglePassHtmlPromptV2 = (
+  compactSpecsHtml: string,
+  examTypeRequirements: string,
+  assignedLessonRequirements: AssignedLessonRequirement[],
+  effectiveQuestionCount: number,
+  questionChecklist: string,
+  questionRangePrompt: string,
+  questionRanges: QuestionRange[],
+  subject: string,
+  examType: string,
+  duration: number,
+) => {
+  const lessonAssignmentText = assignedLessonRequirements.length > 0
+    ? assignedLessonRequirements.map((lesson) => {
+      const assignmentLines = lesson.assignments.map((assignment) => {
+        const questionNumbers = assignment.numbers.map((number) => `Cau ${number}`).join(', ');
+        const levelDetails = buildLessonAssignmentDetails(assignment);
+        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dung dung cac so cau: ${questionNumbers}.${levelDetails ? ` Phan theo muc do: ${levelDetails}.` : ''}`;
+      }).join('\n');
+
+      return `- Chuong: ${lesson.chapterName}\n  Bai: ${lesson.lessonName}\n${assignmentLines}`;
+    }).join('\n')
+    : '- Khong tach duoc theo tung bai tu ma tran, hay bam dung cau truc tong the ben duoi.';
+
+  const activeSections = questionRanges
+    .map((range, index) => ({
+      range,
+      type: QUESTION_TYPE_SEQUENCE[index],
+      roman: ROMAN_NUMERALS[index] || `${index + 1}`,
+    }))
+    .filter((item) => item.range.total > 0);
+
+  const sectionRules = activeSections.length > 0
+    ? activeSections.map((item) =>
+      `- PHAN ${item.roman}: ${QUESTION_SECTION_TITLES[item.type]} chi gom cac cau ${item.range.start}-${item.range.end}.`,
+    ).join('\n')
+    : '- Tao de theo dung cau truc tong the.';
+
+  const sectionSkeleton = activeSections.length > 0
+    ? activeSections.map((item) =>
+      `<section class="exam-section">\n  <h4>PHAN ${item.roman}. ${QUESTION_SECTION_TITLES[item.type]}</h4>\n</section>`,
+    ).join('\n')
+    : '<section class="exam-section"></section>';
+
+  return `Ban la giao vien Viet Nam. Hay tao TOAN BO DE THI HOAN CHINH chi trong 1 lan tra loi.
+
+DU LIEU NGUON:
+${compactSpecsHtml}
+
+CAU TRUC TONG THE BAT BUOC:
+- Tong so cau: ${effectiveQuestionCount}
+${questionRangePrompt}
+
+PHAN BO TUNG DANG:
+${examTypeRequirements}
+
+PHAN BO THEO TUNG BAI:
+${lessonAssignmentText}
+
+CAC SECTION BAT BUOC:
+${sectionRules}
+
+BAT BUOC:
+- Chi tra ve duy nhat 1 tai lieu HTML hoan chinh.
+- KHONG tra ve JSON.
+- KHONG tra ve markdown code block.
+- KHONG giai thich them.
+- Phai tao du tat ca cac cau tu Cau 1 den Cau ${effectiveQuestionCount}.
+- Cac so cau bat buoc phai du: ${questionChecklist}.
+- Khong duoc doi loai cau giua cac dai so cau.
+- Moi cau phai la cau that, co noi dung day du, khong placeholder, khong "...".
+- Cau trac nghiem 1 dap an phai co du 4 lua chon A, B, C, D.
+- Cau dung/sai phai co du 4 menh de a, b, c, d.
+- Cau tra loi ngan phai co noi dung day du va co dap an ngan ro rang.
+- Cau tu luan phai co huong dan cham chi tiet.
+- Bang dap an cuoi bai phai du cho tat ca cac cau, khong de trong o nao.
+
+HTML KHUNG PHAI THEO:
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>De kiem tra ${examType} - ${subject}</title>
+</head>
+<body>
+  <h3>DE KIEM TRA ${examType.toUpperCase()} - ${subject.toUpperCase()}</h3>
+  <p><strong>TRUONG THPT ...............</strong></p>
+  <p><strong>NAM HOC 20... - 20...</strong></p>
+  <p><strong>Thoi gian lam bai: ${duration} phut</strong></p>
+  <p>Ho va ten: .................................... SBD: ........................</p>
+  ${sectionSkeleton}
+  <h3>DAP AN</h3>
+  <table>
+    <tr><th>Cau</th><th>1</th><th>2</th></tr>
+    <tr><th>Dap an</th><td>A</td><td>B</td></tr>
+  </table>
+  <h3>HUONG DAN CHAM</h3>
+</body>
+</html>
+
+QUY TAC NOI DUNG:
+- Trong than de, moi cau phai bat dau bang chuoi "Cau X." dung thu tu.
+- Trac nghiem: sau "Cau X." phai co 4 dong A. B. C. D.
+- Dung/sai: sau "Cau X." phai co 4 dong a) b) c) d).
+- Tra loi ngan: sau "Cau X." la noi dung cau hoi day du.
+- Tu luan: sau "Cau X." la noi dung cau hoi day du.
+- Muc DAP AN phai dung dang bang, moi bang toi da 10 cau, gom 2 dong: "Cau" va "Dap an".
+- O dap an cua cau trac nghiem chi ghi 1 ky tu A/B/C/D.
+- O dap an cua cau dung/sai ghi du 4 gia tri, vi du "D, S, D, S".
+- O dap an cua cau tra loi ngan ghi dap an ngan chinh xac.
+- O dap an cua cau tu luan ghi "TL".
+
+CHI TRA VE HTML THUAN VA CHI 1 TAI LIEU HTML DUY NHAT.`;
+};
+
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
   if (question.type === 'multiple_choice') {
     return typeof question.answer === 'string' ? question.answer : '';
@@ -2570,20 +2685,21 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const shouldUseSingleCallPrompt = true;
       if (shouldUseSingleCallPrompt) {
-        const singlePassPrompt = buildSinglePassHtmlPrompt(
+        const singlePassPrompt = buildSinglePassHtmlPromptV2(
           compactSpecsHtml,
           examTypeRequirements,
           assignedLessonRequirements,
           effectiveQuestionCount,
           questionChecklist,
           questionRangePrompt,
+          examQuestionRanges,
           monHoc,
           loaiKiemTra,
           thoiGian,
         );
 
         const singlePassResult = await callGeminiAI(singlePassPrompt, apiKey, model, {
-          temperature: 0.05,
+          temperature: 0,
           maxOutputTokens: 32768,
         });
 
