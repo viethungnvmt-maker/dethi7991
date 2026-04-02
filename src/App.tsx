@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r14';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r15';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -1520,6 +1520,96 @@ QUY TAC NOI DUNG:
 CHI TRA VE HTML THUAN VA CHI 1 TAI LIEU HTML DUY NHAT.`;
 };
 
+const buildSinglePassStructuredPromptV2 = (
+  compactSpecsHtml: string,
+  examTypeRequirements: string,
+  assignedLessonRequirements: AssignedLessonRequirement[],
+  effectiveQuestionCount: number,
+  questionChecklist: string,
+  questionRangePrompt: string,
+) => {
+  const lessonAssignmentText = assignedLessonRequirements.length > 0
+    ? assignedLessonRequirements.map((lesson) => {
+      const assignmentLines = lesson.assignments.map((assignment) => {
+        const questionNumbers = assignment.numbers.map((number) => `Cau ${number}`).join(', ');
+        const levelDetails = buildLessonAssignmentDetails(assignment);
+        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dung dung cac so cau: ${questionNumbers}.${levelDetails ? ` Phan theo muc do: ${levelDetails}.` : ''}`;
+      }).join('\n');
+
+      return `- Chuong: ${lesson.chapterName}\n  Bai: ${lesson.lessonName}\n${assignmentLines}`;
+    }).join('\n')
+    : '- Khong tach duoc theo tung bai tu ma tran, hay bam dung cau truc tong the ben duoi.';
+
+  return `Ban la giao vien Viet Nam. Hay tao DUY NHAT 1 JSON object cho de thi.
+
+DU LIEU NGUON:
+${compactSpecsHtml}
+
+CAU TRUC TONG THE BAT BUOC:
+- Tong so cau: ${effectiveQuestionCount}
+${questionRangePrompt}
+
+PHAN BO TUNG DANG:
+${examTypeRequirements}
+
+PHAN BO THEO TUNG BAI:
+${lessonAssignmentText}
+
+BAT BUOC:
+- Chi tra ve 1 JSON object hop le, khong markdown, khong giai thich.
+- JSON phai co dung 1 khoa "questions".
+- Mang "questions" phai co dung ${effectiveQuestionCount} phan tu.
+- So thu tu phai day du va lien tuc: ${questionChecklist}.
+- Neu bai nao duoc giao cau nao thi phai tao dung cau do cho dung bai do.
+- Khong duoc doi loai cau giua cac dai so cau.
+- Moi cau phai la cau that, co noi dung day du, khong placeholder, khong "...".
+- Khong duoc bo sot cau trac nghiem 1 dap an.
+- Khong duoc bo sot cau tra loi ngan/dien khuyet.
+- Cau trac nghiem 1 dap an phai co du 4 lua chon A, B, C, D.
+- Cau dung/sai phai co du 4 menh de a, b, c, d va 4 dap an tuong ung.
+- Cau tra loi ngan phai co prompt day du va answer ngan chinh xac.
+- Cau tu luan phai co answerGuide hoac rubric.
+- Moi chuoi phai bang tieng Viet va khong duoc rong.
+
+Schema bat buoc:
+{
+  "questions": [
+    {
+      "number": 1,
+      "type": "multiple_choice",
+      "prompt": "Noi dung cau hoi",
+      "options": ["Phuong an A", "Phuong an B", "Phuong an C", "Phuong an D"],
+      "answer": "A"
+    },
+    {
+      "number": 8,
+      "type": "true_false",
+      "prompt": "De dan",
+      "statements": ["Menh de a", "Menh de b", "Menh de c", "Menh de d"],
+      "answer": ["D", "S", "D", "S"]
+    },
+    {
+      "number": 9,
+      "type": "short_answer",
+      "prompt": "Noi dung cau tra loi ngan/dien khuyet",
+      "answer": "Dap an ngan"
+    },
+    {
+      "number": 10,
+      "type": "essay",
+      "prompt": "Noi dung cau tu luan",
+      "answerGuide": "Goi y dap an",
+      "rubric": [
+        { "content": "Y 1", "points": 0.5 },
+        { "content": "Y 2", "points": 0.5 }
+      ]
+    }
+  ]
+}
+
+CHI TRA VE JSON OBJECT DUY NHAT.`;
+};
+
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
   if (question.type === 'multiple_choice') {
     return typeof question.answer === 'string' ? question.answer : '';
@@ -2685,38 +2775,43 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
       const shouldUseSingleCallPrompt = true;
       if (shouldUseSingleCallPrompt) {
-        const singlePassPrompt = buildSinglePassHtmlPromptV2(
+        const singlePassPrompt = buildSinglePassStructuredPromptV2(
           compactSpecsHtml,
           examTypeRequirements,
           assignedLessonRequirements,
           effectiveQuestionCount,
           questionChecklist,
           questionRangePrompt,
-          examQuestionRanges,
-          monHoc,
-          loaiKiemTra,
-          thoiGian,
         );
 
         const singlePassResult = await callGeminiAI(singlePassPrompt, apiKey, model, {
           temperature: 0,
           maxOutputTokens: 32768,
+          responseMimeType: 'application/json',
         });
 
-        const cleanHtml = extractHtmlDocumentFromResponse(singlePassResult);
-        if (!/<(?:!doctype|html|body|table|div|section|main)\b/i.test(cleanHtml)) {
+        const structuredValidation = validateStructuredExamPayload(singlePassResult, effectiveQuestionCount, examQuestionRanges);
+        if (!structuredValidation.isComplete) {
           console.error('Single-pass exam generation failed', {
-            reason: 'AI did not return valid HTML',
+            reason: structuredValidation.summary,
             assignedLessonRequirements,
           });
           throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
         }
+        const cleanHtml = buildExamHtmlFromStructuredQuestions(
+          structuredValidation.questions,
+          monHoc,
+          loaiKiemTra,
+          thoiGian,
+          examQuestionRanges,
+        );
 
         const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
         const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
 
         if (!questionContentValidation.isComplete || !answerKeyValidation.isComplete) {
           console.error('Single-pass rendered exam validation failed', {
+            structuredSummary: structuredValidation.summary,
             questionSummary: questionContentValidation.summary,
             answerSummary: answerKeyValidation.summary,
           });
