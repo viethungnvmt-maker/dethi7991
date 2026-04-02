@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r11';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r13';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -243,6 +243,27 @@ const normalizeAsciiText = (value: string) =>
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+
+const DEFAULT_EXAM_GENERATION_ERROR_MESSAGE = 'AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.';
+
+const toUserFacingExamGenerationErrorMessage = (message: string) => {
+  const normalized = normalizeAsciiText(message);
+
+  if (!normalized) {
+    return DEFAULT_EXAM_GENERATION_ERROR_MESSAGE;
+  }
+
+  if (
+    normalized.includes('json hop le')
+    || normalized.includes('html hop le')
+    || normalized.includes('structured exam')
+    || normalized.includes('single-pass exam generation failed')
+  ) {
+    return DEFAULT_EXAM_GENERATION_ERROR_MESSAGE;
+  }
+
+  return message;
+};
 
 const normalizeAnswerCellValue = (value: string) =>
   value
@@ -1288,26 +1309,47 @@ CHỈ TRẢ VỀ JSON OBJECT:
 }`;
 };
 
-const buildSinglePassExamPrompt = (
+const buildLessonAssignmentDetails = (assignment: LessonQuestionAssignment) => {
+  let cursor = 0;
+  const parts = STRUCTURE_LEVELS
+    .map(({ key, label }) => {
+      const count = assignment.levels[key];
+      if (count <= 0) return '';
+
+      const numbers = assignment.numbers.slice(cursor, cursor + count);
+      cursor += count;
+      const questionNumbers = numbers.map((number) => `Câu ${number}`).join(', ');
+      return `${label}: ${questionNumbers}`;
+    })
+    .filter(Boolean);
+
+  return parts.join('; ');
+};
+
+const buildSinglePassHtmlPrompt = (
   compactSpecsHtml: string,
   examTypeRequirements: string,
   assignedLessonRequirements: AssignedLessonRequirement[],
   effectiveQuestionCount: number,
   questionChecklist: string,
   questionRangePrompt: string,
+  subject: string,
+  examType: string,
+  duration: number,
 ) => {
   const lessonAssignmentText = assignedLessonRequirements.length > 0
     ? assignedLessonRequirements.map((lesson) => {
       const assignmentLines = lesson.assignments.map((assignment) => {
-        const numbers = assignment.numbers.map((number) => `Câu ${number}`).join(', ');
-        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dùng đúng các số câu: ${numbers}.`;
+        const questionNumbers = assignment.numbers.map((number) => `Câu ${number}`).join(', ');
+        const levelDetails = buildLessonAssignmentDetails(assignment);
+        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dùng đúng các số câu: ${questionNumbers}.${levelDetails ? ` Phân theo mức độ: ${levelDetails}.` : ''}`;
       }).join('\n');
 
       return `- Chương: ${lesson.chapterName}\n  Bài: ${lesson.lessonName}\n${assignmentLines}`;
     }).join('\n')
     : '- Không trích được phân bố theo từng bài từ ma trận, hãy bám đúng cấu trúc tổng thể bên dưới.';
 
-  return `Dựa trên bảng đặc tả sau, hãy tạo TOÀN BỘ dữ liệu câu hỏi cho đề kiểm tra chỉ trong MỘT lần trả lời.
+  return `Dựa trên bảng đặc tả sau, hãy soạn TOÀN BỘ ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM chỉ trong MỘT lần trả lời.
 
 BẢNG ĐẶC TẢ:
 ${compactSpecsHtml}
@@ -1337,41 +1379,30 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 - Câu tự luận phải có answerGuide hoặc rubric.
 - Mọi chuỗi phải bằng tiếng Việt và không được rỗng.
 
-CHỈ TRẢ VỀ JSON OBJECT, KHÔNG markdown, KHÔNG HTML, KHÔNG giải thích.
-Schema bắt buộc:
-{
-  "questions": [
-    {
-      "number": 1,
-      "type": "multiple_choice",
-      "prompt": "Nội dung câu hỏi",
-      "options": ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
-      "answer": "A"
-    },
-    {
-      "number": 8,
-      "type": "true_false",
-      "prompt": "Đề dẫn",
-      "statements": ["Mệnh đề a", "Mệnh đề b", "Mệnh đề c", "Mệnh đề d"],
-      "answer": ["Đ", "S", "Đ", "S"]
-    },
-    {
-      "number": 9,
-      "type": "short_answer",
-      "prompt": "Nội dung câu trả lời ngắn/điền khuyết",
-      "answer": "Đáp án ngắn"
-    },
-    {
-      "number": 10,
-      "type": "essay",
-      "prompt": "Nội dung câu tự luận",
-      "answerGuide": "Gợi ý đáp án",
-      "rubric": [
-        { "content": "Ý 1", "points": 0.5 }
-      ]
-    }
-  ]
-}`;
+YÊU CẦU OUTPUT:
+1. Full HTML Document (<!DOCTYPE html>...)
+2. Tiêu đề: ĐỀ KIỂM TRA ${examType.toUpperCase()} - ${subject.toUpperCase()}
+3. Thời gian: ${duration} phút
+4. Năm học: "NĂM HỌC 20... - 20..." (để trống)
+5. Trường: "TRƯỜNG THPT ..............." (để trống)
+6. Có phần Họ tên, SBD
+7. Đề phải có đủ toàn bộ câu từ Câu 1 đến Câu ${effectiveQuestionCount}
+8. Các phần câu hỏi phải hiển thị đầy đủ trong thân đề, không được chỉ có số câu ở bảng đáp án
+9. Đáp án cuối bài phải trình bày dạng bảng, mỗi bảng 10 câu, gồm 2 dòng:
+   - Dòng 1: "Câu" | 1 | 2 | ...
+   - Dòng 2: "Đáp án" | đáp án tương ứng
+10. Với câu 1 lựa chọn: ô đáp án chỉ ghi 1 ký tự A/B/C/D
+11. Với câu đúng/sai: ô đáp án ghi đủ 4 mệnh đề, ví dụ "Đ, S, Đ, S"
+12. Với câu trả lời ngắn: ô đáp án ghi đáp án ngắn chính xác
+13. Với câu tự luận: ô đáp án ghi "TL" và phải có hướng dẫn chấm chi tiết
+
+Format câu hỏi:
+- Trắc nghiệm: Câu X. Nội dung -> A. B. C. D.
+- Đúng/Sai: Câu X. Đề dẫn -> a) ... b) ... c) ... d) ...
+- Trả lời ngắn: Câu X. Nội dung
+- Tự luận: Câu X. Nội dung
+
+CHỈ trả về HTML thuần, KHÔNG markdown code block, KHÔNG giải thích thêm.`;
 };
 
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
@@ -2537,46 +2568,33 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
 
-      const shouldUseSingleCallPrompt = true as boolean;
+      const shouldUseSingleCallPrompt = true;
       if (shouldUseSingleCallPrompt) {
-        const singlePassPrompt = buildSinglePassExamPrompt(
+        const singlePassPrompt = buildSinglePassHtmlPrompt(
           compactSpecsHtml,
           examTypeRequirements,
           assignedLessonRequirements,
           effectiveQuestionCount,
           questionChecklist,
           questionRangePrompt,
+          monHoc,
+          loaiKiemTra,
+          thoiGian,
         );
 
         const singlePassResult = await callGeminiAI(singlePassPrompt, apiKey, model, {
           temperature: 0.05,
           maxOutputTokens: 32768,
-          responseMimeType: 'application/json',
         });
 
-        const structuredValidation = validateStructuredExamPayload(
-          singlePassResult,
-          effectiveQuestionCount,
-          examQuestionRanges,
-        );
-
-        if (!structuredValidation.isComplete) {
+        const cleanHtml = extractHtmlDocumentFromResponse(singlePassResult);
+        if (!/<(?:!doctype|html|body|table|div|section|main)\b/i.test(cleanHtml)) {
           console.error('Single-pass exam generation failed', {
-            summary: structuredValidation.summary,
-            effectiveQuestionCount,
-            examQuestionRanges,
+            reason: 'AI did not return valid HTML',
             assignedLessonRequirements,
           });
           throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
         }
-
-        const cleanHtml = buildExamHtmlFromStructuredQuestions(
-          structuredValidation.questions,
-          monHoc,
-          loaiKiemTra,
-          thoiGian,
-          examQuestionRanges,
-        );
 
         const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
         const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
@@ -3052,10 +3070,11 @@ LẦN THỬ ${attempt}:
       setExamHtml('');
       console.error('Generate exam error:', error);
       const rawMessage = typeof error?.message === 'string' ? error.message : '';
+      const safeUserMessage = toUserFacingExamGenerationErrorMessage(rawMessage);
       const userMessage = rawMessage || 'Không thể tạo đề thi ở lần này. Vui lòng thử lại.';
       Swal.fire({
         title: 'Chưa tạo được đề',
-        text: userMessage,
+        text: safeUserMessage || userMessage,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
