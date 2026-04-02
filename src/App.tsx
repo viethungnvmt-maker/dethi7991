@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r15';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r18';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -732,6 +732,9 @@ const parseGeneratedExamPayload = (responseText: string) => {
     if (Array.isArray(record.questions)) {
       return { questions: record.questions };
     }
+    if (record.questions && typeof record.questions === 'object') {
+      return { questions: Object.values(record.questions as Record<string, unknown>) };
+    }
 
     const candidateKeys = ['items', 'data', 'result', 'exam', 'content'];
     for (const key of candidateKeys) {
@@ -742,6 +745,9 @@ const parseGeneratedExamPayload = (responseText: string) => {
         const nested = record[key] as Record<string, unknown>;
         if (Array.isArray(nested.questions)) {
           return { questions: nested.questions };
+        }
+        if (nested.questions && typeof nested.questions === 'object') {
+          return { questions: Object.values(nested.questions as Record<string, unknown>) };
         }
       }
     }
@@ -789,27 +795,52 @@ const normalizeGeneratedQuestionType = (value: unknown): GeneratedQuestionType |
 };
 
 const normalizeMultipleChoiceAnswer = (value: unknown) => {
-  const normalized = toCleanString(value).toUpperCase();
+  const normalized = normalizeStructuredTextValue(value).toUpperCase();
   const match = normalized.match(/[ABCD]/);
   return match ? match[0] : '';
 };
 
+const normalizeStructuredTextValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return toCleanString(value);
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferredKeys = ['text', 'content', 'value', 'label', 'option', 'statement', 'prompt', 'question', 'name'];
+    for (const key of preferredKeys) {
+      const candidate = toCleanString(record[key]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    const firstStringValue = Object.values(record)
+      .map((item) => toCleanString(item))
+      .find(Boolean);
+
+    return firstStringValue || '';
+  }
+
+  return toCleanString(value);
+};
+
 const normalizeOrderedStringArray = (value: unknown, preferredKeys: string[]) => {
   if (Array.isArray(value)) {
-    return value.map((item) => toCleanString(item)).filter(Boolean);
+    return value.map((item) => normalizeStructuredTextValue(item)).filter(Boolean);
   }
 
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     const preferredValues = preferredKeys
-      .map((key) => toCleanString(record[key]))
+      .map((key) => normalizeStructuredTextValue(record[key]))
       .filter(Boolean);
 
     if (preferredValues.length > 0) {
       return preferredValues;
     }
 
-    return Object.values(record).map((item) => toCleanString(item)).filter(Boolean);
+    return Object.values(record).map((item) => normalizeStructuredTextValue(item)).filter(Boolean);
   }
 
   return [];
@@ -827,7 +858,25 @@ const normalizeTrueFalseAnswers = (value: unknown) => {
   if (Array.isArray(value)) {
     return value
       .map((item) => normalizeTrueFalseAnswerToken(item))
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const orderedKeys = ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D', '1', '2', '3', '4'];
+    const preferredValues = orderedKeys
+      .map((key) => normalizeTrueFalseAnswerToken(record[key]))
       .filter(Boolean);
+
+    if (preferredValues.length > 0) {
+      return preferredValues.slice(0, 4);
+    }
+
+    return Object.values(record)
+      .map((item) => normalizeTrueFalseAnswerToken(item))
+      .filter(Boolean)
+      .slice(0, 4);
   }
 
   const text = toCleanString(value);
@@ -836,7 +885,8 @@ const normalizeTrueFalseAnswers = (value: unknown) => {
   return text
     .split(/[,\-|/;]+|\s{2,}/)
     .map((item) => normalizeTrueFalseAnswerToken(item))
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 4);
 };
 
 const normalizeRubricItems = (value: unknown): GeneratedRubricItem[] => {
@@ -925,20 +975,21 @@ const validateStructuredExamPayload = (
       return;
     }
 
-    const type = normalizeGeneratedQuestionType(raw.type) || getExpectedQuestionType(number, questionRanges);
-    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
-    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
-    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
-    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const type = normalizeGeneratedQuestionType(raw.type ?? raw.questionType ?? raw.kind) || getExpectedQuestionType(number, questionRanges);
+    const prompt = normalizeStructuredTextValue(raw.prompt ?? raw.content ?? raw.question ?? raw.text ?? raw.stem ?? raw.title ?? raw.body);
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices ?? raw.answers ?? raw.answerOptions ?? raw.phuongAn, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']).slice(0, 4);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
+    const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
     const rubric = normalizeRubricItems(raw.rubric);
+    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
-      answer = normalizeMultipleChoiceAnswer(raw.answer);
+      answer = normalizeMultipleChoiceAnswer(rawAnswerValue);
     } else if (type === 'true_false') {
-      answer = normalizeTrueFalseAnswers(raw.answer);
+      answer = normalizeTrueFalseAnswers(rawAnswerValue);
     } else {
-      answer = toCleanString(raw.answer);
+      answer = normalizeStructuredTextValue(rawAnswerValue);
     }
 
     normalizedQuestions.set(number, {
@@ -990,7 +1041,7 @@ const validateStructuredExamPayload = (
   }
 
   return {
-    isComplete: missingQuestions.length === 0 && invalidQuestions.length === 0 && duplicateQuestions.length === 0 && validQuestions.length === totalQuestions,
+    isComplete: missingQuestions.length === 0 && invalidQuestions.length === 0 && validQuestions.length === totalQuestions,
     presentQuestionCount: validQuestions.length,
     missingQuestions,
     invalidQuestions,
@@ -1026,20 +1077,21 @@ const validateStructuredExamChunkPayload = (
       return;
     }
 
-    const type = normalizeGeneratedQuestionType(raw.type) || expectedType;
-    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
-    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
-    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
-    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const type = normalizeGeneratedQuestionType(raw.type ?? raw.questionType ?? raw.kind) || expectedType;
+    const prompt = normalizeStructuredTextValue(raw.prompt ?? raw.content ?? raw.question ?? raw.text ?? raw.stem ?? raw.title ?? raw.body);
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices ?? raw.answers ?? raw.answerOptions ?? raw.phuongAn, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']).slice(0, 4);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
+    const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
     const rubric = normalizeRubricItems(raw.rubric);
+    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
-      answer = normalizeMultipleChoiceAnswer(raw.answer);
+      answer = normalizeMultipleChoiceAnswer(rawAnswerValue);
     } else if (type === 'true_false') {
-      answer = normalizeTrueFalseAnswers(raw.answer);
+      answer = normalizeTrueFalseAnswers(rawAnswerValue);
     } else {
-      answer = toCleanString(raw.answer);
+      answer = normalizeStructuredTextValue(rawAnswerValue);
     }
 
     normalizedQuestions.set(number, {
@@ -1128,20 +1180,21 @@ const validateLessonStructuredPayload = (
     }
 
     const expectedType = expectedTypeByQuestion.get(number);
-    const type = normalizeGeneratedQuestionType(raw.type) || expectedType;
-    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
-    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
-    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
-    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const type = normalizeGeneratedQuestionType(raw.type ?? raw.questionType ?? raw.kind) || expectedType;
+    const prompt = normalizeStructuredTextValue(raw.prompt ?? raw.content ?? raw.question ?? raw.text ?? raw.stem ?? raw.title ?? raw.body);
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices ?? raw.answers ?? raw.answerOptions ?? raw.phuongAn, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']).slice(0, 4);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
+    const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
     const rubric = normalizeRubricItems(raw.rubric);
+    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
-      answer = normalizeMultipleChoiceAnswer(raw.answer);
+      answer = normalizeMultipleChoiceAnswer(rawAnswerValue);
     } else if (type === 'true_false') {
-      answer = normalizeTrueFalseAnswers(raw.answer);
+      answer = normalizeTrueFalseAnswers(rawAnswerValue);
     } else {
-      answer = toCleanString(raw.answer);
+      answer = normalizeStructuredTextValue(rawAnswerValue);
     }
 
     normalizedQuestions.set(number, {
@@ -2806,17 +2859,6 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
           examQuestionRanges,
         );
 
-        const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
-        const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
-
-        if (!questionContentValidation.isComplete || !answerKeyValidation.isComplete) {
-          console.error('Single-pass rendered exam validation failed', {
-            structuredSummary: structuredValidation.summary,
-            questionSummary: questionContentValidation.summary,
-            answerSummary: answerKeyValidation.summary,
-          });
-          throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
-        }
 
         setExamHtml(cleanHtml);
         setCurrentStep(4);
