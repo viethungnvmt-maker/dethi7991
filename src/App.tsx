@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r7';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r10';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -150,6 +150,16 @@ const parseScoreInputValue = (value: string) => {
 
   return Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
 };
+
+const createEmptyLevelCountMap = (): LevelCountMap => ({
+  biet: 0,
+  hieu: 0,
+  vandung: 0,
+  vandungcao: 0,
+});
+
+const sumLevelCountMap = (value: LevelCountMap) =>
+  STRUCTURE_LEVELS.reduce((sum, level) => sum + value[level.key], 0);
 
 const snapScoreValue = (value: number) => Math.max(0, Math.round((value + Number.EPSILON) * 4) / 4);
 
@@ -433,6 +443,30 @@ interface StructuredExamChunkValidationResult {
   questions: GeneratedExamQuestion[];
 }
 
+type LevelCountMap = Record<StructureLevelKey, number>;
+
+interface LessonMatrixRequirement {
+  chapterName: string;
+  lessonName: string;
+  countsByType: Record<GeneratedQuestionType, LevelCountMap>;
+}
+
+interface LessonQuestionAssignment {
+  type: GeneratedQuestionType;
+  start: number;
+  end: number;
+  numbers: number[];
+  total: number;
+  levels: LevelCountMap;
+}
+
+interface AssignedLessonRequirement {
+  chapterName: string;
+  lessonName: string;
+  assignments: LessonQuestionAssignment[];
+  totalQuestions: number;
+}
+
 const stripQuestionLabel = (value: string) =>
   value.replace(/^\s*Câu\s*\d+\s*[:.)-]?\s*/i, '').trim();
 
@@ -622,27 +656,82 @@ const sanitizeGeneratedJson = (value: string) =>
 
 const extractJsonDocumentFromResponse = (responseText: string) => {
   const sanitized = sanitizeGeneratedJson(responseText);
+  const candidates = [
+    sanitized,
+    sanitized.replace(/,\s*([}\]])/g, '$1'),
+  ];
 
-  try {
-    JSON.parse(sanitized);
-    return sanitized;
-  } catch {
-    const start = sanitized.indexOf('{');
-    const end = sanitized.lastIndexOf('}');
+  for (const candidateText of candidates) {
+    try {
+      JSON.parse(candidateText);
+      return candidateText;
+    } catch {
+      const objectStart = candidateText.indexOf('{');
+      const objectEnd = candidateText.lastIndexOf('}');
 
-    if (start >= 0 && end > start) {
-      const candidate = sanitized.slice(start, end + 1).trim();
-      JSON.parse(candidate);
-      return candidate;
+      if (objectStart >= 0 && objectEnd > objectStart) {
+        const objectCandidate = candidateText.slice(objectStart, objectEnd + 1).trim();
+        try {
+          JSON.parse(objectCandidate);
+          return objectCandidate;
+        } catch {
+          // Try array candidate below.
+        }
+      }
+
+      const arrayStart = candidateText.indexOf('[');
+      const arrayEnd = candidateText.lastIndexOf(']');
+
+      if (arrayStart >= 0 && arrayEnd > arrayStart) {
+        const arrayCandidate = candidateText.slice(arrayStart, arrayEnd + 1).trim();
+        try {
+          JSON.parse(arrayCandidate);
+          return arrayCandidate;
+        } catch {
+          // Try the next candidate variant.
+        }
+      }
     }
-
-    throw new Error('AI không trả về JSON hợp lệ.');
   }
+
+  throw new Error('AI không trả về JSON hợp lệ.');
 };
 
 const parseGeneratedExamPayload = (responseText: string) => {
   const jsonText = extractJsonDocumentFromResponse(responseText);
-  return JSON.parse(jsonText) as { questions?: unknown[] };
+  const parsed = JSON.parse(jsonText) as unknown;
+
+  if (Array.isArray(parsed)) {
+    return { questions: parsed };
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>;
+
+    if (Array.isArray(record.questions)) {
+      return { questions: record.questions };
+    }
+
+    const candidateKeys = ['items', 'data', 'result', 'exam', 'content'];
+    for (const key of candidateKeys) {
+      if (Array.isArray(record[key])) {
+        return { questions: record[key] as unknown[] };
+      }
+      if (record[key] && typeof record[key] === 'object') {
+        const nested = record[key] as Record<string, unknown>;
+        if (Array.isArray(nested.questions)) {
+          return { questions: nested.questions };
+        }
+      }
+    }
+
+    const firstArrayValue = Object.values(record).find(Array.isArray);
+    if (Array.isArray(firstArrayValue)) {
+      return { questions: firstArrayValue as unknown[] };
+    }
+  }
+
+  return { questions: [] };
 };
 
 const getExpectedQuestionType = (
@@ -682,6 +771,27 @@ const normalizeMultipleChoiceAnswer = (value: unknown) => {
   const normalized = toCleanString(value).toUpperCase();
   const match = normalized.match(/[ABCD]/);
   return match ? match[0] : '';
+};
+
+const normalizeOrderedStringArray = (value: unknown, preferredKeys: string[]) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => toCleanString(item)).filter(Boolean);
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferredValues = preferredKeys
+      .map((key) => toCleanString(record[key]))
+      .filter(Boolean);
+
+    if (preferredValues.length > 0) {
+      return preferredValues;
+    }
+
+    return Object.values(record).map((item) => toCleanString(item)).filter(Boolean);
+  }
+
+  return [];
 };
 
 const normalizeTrueFalseAnswerToken = (value: unknown) => {
@@ -794,10 +904,10 @@ const validateStructuredExamPayload = (
       return;
     }
 
-    const type = normalizeGeneratedQuestionType(raw.type);
+    const type = normalizeGeneratedQuestionType(raw.type) || getExpectedQuestionType(number, questionRanges);
     const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
-    const options = Array.isArray(raw.options) ? raw.options.map((option) => toCleanString(option)).filter(Boolean) : [];
-    const statements = Array.isArray(raw.statements) ? raw.statements.map((statement) => toCleanString(statement)).filter(Boolean) : [];
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
     const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
     const rubric = normalizeRubricItems(raw.rubric);
 
@@ -895,10 +1005,10 @@ const validateStructuredExamChunkPayload = (
       return;
     }
 
-    const type = normalizeGeneratedQuestionType(raw.type);
+    const type = normalizeGeneratedQuestionType(raw.type) || expectedType;
     const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
-    const options = Array.isArray(raw.options) ? raw.options.map((option) => toCleanString(option)).filter(Boolean) : [];
-    const statements = Array.isArray(raw.statements) ? raw.statements.map((statement) => toCleanString(statement)).filter(Boolean) : [];
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
     const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
     const rubric = normalizeRubricItems(raw.rubric);
 
@@ -963,8 +1073,117 @@ const validateStructuredExamChunkPayload = (
   };
 };
 
+const validateLessonStructuredPayload = (
+  responseText: string,
+  lessonRequirement: AssignedLessonRequirement,
+): StructuredExamChunkValidationResult => {
+  const payload = parseGeneratedExamPayload(responseText);
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  const normalizedQuestions = new Map<number, GeneratedExamQuestion>();
+  const expectedTypeByQuestion = new Map<number, GeneratedQuestionType>();
+  const missingQuestions: number[] = [];
+  const invalidQuestions: number[] = [];
+  const validQuestions: GeneratedExamQuestion[] = [];
+
+  lessonRequirement.assignments.forEach((assignment) => {
+    assignment.numbers.forEach((number) => {
+      expectedTypeByQuestion.set(number, assignment.type);
+    });
+  });
+
+  rawQuestions.forEach((item) => {
+    const raw = item as Record<string, unknown>;
+    const number = typeof raw.number === 'number'
+      ? raw.number
+      : Number(String(raw.number ?? '').trim());
+
+    if (!Number.isFinite(number) || number <= 0) {
+      return;
+    }
+
+    if (normalizedQuestions.has(number)) {
+      invalidQuestions.push(number);
+      return;
+    }
+
+    const expectedType = expectedTypeByQuestion.get(number);
+    const type = normalizeGeneratedQuestionType(raw.type) || expectedType;
+    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
+    const options = normalizeOrderedStringArray(raw.options ?? raw.choices, ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd']);
+    const statements = normalizeOrderedStringArray(raw.statements ?? raw.items, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']);
+    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const rubric = normalizeRubricItems(raw.rubric);
+
+    let answer: string | string[] | undefined;
+    if (type === 'multiple_choice') {
+      answer = normalizeMultipleChoiceAnswer(raw.answer);
+    } else if (type === 'true_false') {
+      answer = normalizeTrueFalseAnswers(raw.answer);
+    } else {
+      answer = toCleanString(raw.answer);
+    }
+
+    normalizedQuestions.set(number, {
+      number,
+      type: type || 'short_answer',
+      prompt,
+      options,
+      statements,
+      answer,
+      answerGuide,
+      rubric,
+    });
+  });
+
+  for (const questionNumber of normalizedQuestions.keys()) {
+    if (!expectedTypeByQuestion.has(questionNumber)) {
+      invalidQuestions.push(questionNumber);
+    }
+  }
+
+  lessonRequirement.assignments.forEach((assignment) => {
+    assignment.numbers.forEach((questionNumber) => {
+      const question = normalizedQuestions.get(questionNumber);
+      if (!question) {
+        missingQuestions.push(questionNumber);
+        return;
+      }
+
+      if (!isGeneratedQuestionValidForType(question, assignment.type)) {
+        invalidQuestions.push(questionNumber);
+        return;
+      }
+
+      validQuestions.push(question);
+    });
+  });
+
+  const summaryParts: string[] = [];
+  if (missingQuestions.length > 0) {
+    summaryParts.push(`thiếu câu ${formatQuestionNumberList(missingQuestions)}`);
+  }
+  if (invalidQuestions.length > 0) {
+    summaryParts.push(`sai dữ liệu ở câu ${formatQuestionNumberList(invalidQuestions)}`);
+  }
+
+  return {
+    isComplete: missingQuestions.length === 0 && invalidQuestions.length === 0 && validQuestions.length === lessonRequirement.totalQuestions,
+    presentQuestionCount: validQuestions.length,
+    missingQuestions,
+    invalidQuestions,
+    summary: summaryParts.join('; ') || `đủ câu cho bài ${lessonRequirement.lessonName}`,
+    questions: validQuestions.sort((a, b) => a.number - b.number),
+  };
+};
+
 const buildQuestionNumberRangeChecklist = (start: number, end: number) =>
   Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => `Câu ${start + index}`).join(', ');
+
+const formatLessonLevelBreakdown = (levels: LevelCountMap) =>
+  STRUCTURE_LEVELS
+    .map(({ key, label }) => (levels[key] > 0 ? `${levels[key]} câu ${label.toLowerCase()}` : ''))
+    .filter(Boolean)
+    .join(', ');
 
 const buildStructuredChunkPrompt = (
   compactSpecsHtml: string,
@@ -1025,6 +1244,46 @@ CHỈ TRẢ VỀ JSON OBJECT:
 {
   "questions": [
     ...
+  ]
+}`;
+};
+
+const buildLessonStructuredPrompt = (
+  compactSpecsHtml: string,
+  lessonRequirement: AssignedLessonRequirement,
+  previousFeedback: string,
+) => {
+  const assignmentLines = lessonRequirement.assignments.map((assignment) => {
+    const questionNumbers = assignment.numbers.map((number) => `Câu ${number}`).join(', ');
+    return `- ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dùng đúng các số câu: ${questionNumbers}.`;
+  }).join('\n');
+
+  return `Dựa trên Bảng đặc tả sau, hãy chỉ tạo câu hỏi cho duy nhất bài học "${lessonRequirement.lessonName}" thuộc chương "${lessonRequirement.chapterName}".
+
+BẢNG ĐẶC TẢ:
+${compactSpecsHtml}
+
+YÊU CẦU CHO RIÊNG BÀI NÀY:
+${assignmentLines}
+
+QUY TẮC:
+- Chỉ tạo câu cho đúng bài "${lessonRequirement.lessonName}".
+- Tổng số câu cần tạo trong lần này: ${lessonRequirement.totalQuestions}.
+- Không được tạo câu ngoài các số câu đã chỉ định.
+- Không được bỏ sót loại câu nào đã yêu cầu ở trên.
+- Mỗi câu phải đầy đủ nội dung, không placeholder, không dấu "...".
+- ${previousFeedback ? `Lỗi lần trước cần tránh: ${previousFeedback}.` : 'Phải tạo đủ đúng ngay trong lần này.'}
+
+CHỈ TRẢ VỀ JSON OBJECT:
+{
+  "questions": [
+    {
+      "number": 1,
+      "type": "multiple_choice",
+      "prompt": "Nội dung câu hỏi",
+      "options": ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
+      "answer": "A"
+    }
   ]
 }`;
 };
@@ -1460,20 +1719,20 @@ const extractIntegerFromCell = (value: string) => {
   return match ? Number(match[0]) : 0;
 };
 
-const buildLessonBreakdownFromMatrix = (
+const extractLessonRequirementsFromMatrix = (
   matrixHtml: string,
   selectedLessonItems: SelectedLessonSummary[],
   includeEssay: boolean,
-) => {
+): LessonMatrixRequirement[] => {
   if (!matrixHtml || selectedLessonItems.length === 0 || typeof DOMParser === 'undefined') {
-    return '';
+    return [];
   }
 
   const doc = new DOMParser().parseFromString(matrixHtml, 'text/html');
   const rows = Array.from(doc.querySelectorAll('tr'));
-  const groupLabels = includeEssay ? EXAM_PROMPT_TYPE_LABELS : EXAM_PROMPT_TYPE_LABELS.slice(0, 3);
-  const requiredValueCells = groupLabels.length * STRUCTURE_LEVELS.length;
-  const lessonLines: string[] = [];
+  const activeTypes = includeEssay ? QUESTION_TYPE_SEQUENCE : QUESTION_TYPE_SEQUENCE.slice(0, 3);
+  const requiredValueCells = activeTypes.length * STRUCTURE_LEVELS.length;
+  const lessonRequirements: LessonMatrixRequirement[] = [];
   let lessonCursor = 0;
 
   rows.forEach((row) => {
@@ -1500,28 +1759,98 @@ const buildLessonBreakdownFromMatrix = (
     const valueCells = cellTexts.slice(lessonCellIndex + 1, lessonCellIndex + 1 + requiredValueCells);
     if (valueCells.length < requiredValueCells) return;
 
-    const summaryParts = groupLabels.map((groupLabel, groupIndex) => {
+    const countsByType = {
+      multiple_choice: createEmptyLevelCountMap(),
+      true_false: createEmptyLevelCountMap(),
+      short_answer: createEmptyLevelCountMap(),
+      essay: createEmptyLevelCountMap(),
+    } satisfies Record<GeneratedQuestionType, LevelCountMap>;
+
+    activeTypes.forEach((questionType, typeIndex) => {
       const levelCells = valueCells.slice(
-        groupIndex * STRUCTURE_LEVELS.length,
-        (groupIndex + 1) * STRUCTURE_LEVELS.length,
+        typeIndex * STRUCTURE_LEVELS.length,
+        (typeIndex + 1) * STRUCTURE_LEVELS.length,
       );
 
-      const levelParts = EXAM_PROMPT_LEVEL_LABELS.map((levelLabel, levelIndex) => {
-        const count = extractIntegerFromCell(levelCells[levelIndex] || '');
-        return count > 0 ? `${count} cau ${levelLabel}` : '';
-      }).filter(Boolean);
+      STRUCTURE_LEVELS.forEach(({ key }, levelIndex) => {
+        countsByType[questionType][key] = extractIntegerFromCell(levelCells[levelIndex] || '');
+      });
+    });
 
-      return levelParts.length > 0 ? `${groupLabel}: ${levelParts.join(', ')}` : '';
-    }).filter(Boolean);
-
-    if (summaryParts.length > 0) {
-      lessonLines.push(`- ${currentLesson.lessonName}: ${summaryParts.join('; ')}.`);
-    }
+    lessonRequirements.push({
+      chapterName: currentLesson.chapterName,
+      lessonName: currentLesson.lessonName,
+      countsByType,
+    });
 
     lessonCursor += 1;
   });
 
-  return lessonLines.join('\n');
+  return lessonRequirements;
+};
+
+const assignQuestionNumbersToLessonRequirements = (
+  lessonRequirements: LessonMatrixRequirement[],
+  questionRanges: QuestionRange[],
+): AssignedLessonRequirement[] => {
+  const assignedLessons = lessonRequirements.map((lesson) => ({
+    chapterName: lesson.chapterName,
+    lessonName: lesson.lessonName,
+    assignments: [] as LessonQuestionAssignment[],
+    totalQuestions: 0,
+  }));
+
+  QUESTION_TYPE_SEQUENCE.forEach((questionType, typeIndex) => {
+    const range = questionRanges[typeIndex];
+    if (!range || range.total <= 0) return;
+
+    let currentQuestion = range.start;
+
+    assignedLessons.forEach((assignedLesson, lessonIndex) => {
+      const levels = lessonRequirements[lessonIndex]?.countsByType[questionType] || createEmptyLevelCountMap();
+      const total = sumLevelCountMap(levels);
+      if (total <= 0) return;
+
+      const numbers = Array.from({ length: total }, (_, index) => currentQuestion + index);
+      assignedLesson.assignments.push({
+        type: questionType,
+        start: currentQuestion,
+        end: currentQuestion + total - 1,
+        numbers,
+        total,
+        levels: { ...levels },
+      });
+      assignedLesson.totalQuestions += total;
+      currentQuestion += total;
+    });
+  });
+
+  return assignedLessons.filter((lesson) => lesson.totalQuestions > 0);
+};
+
+const buildLessonBreakdownFromMatrix = (
+  matrixHtml: string,
+  selectedLessonItems: SelectedLessonSummary[],
+  includeEssay: boolean,
+) => {
+  return extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, includeEssay)
+    .map((lesson) => {
+      const summaryParts = QUESTION_TYPE_SEQUENCE
+        .filter((questionType, index) => includeEssay || index < 3)
+        .map((questionType, index) => {
+          const levelParts = EXAM_PROMPT_LEVEL_LABELS.map((levelLabel, levelIndex) => {
+            const count = lesson.countsByType[questionType][STRUCTURE_LEVELS[levelIndex].key];
+            return count > 0 ? `${count} cau ${levelLabel}` : '';
+          }).filter(Boolean);
+
+          return levelParts.length > 0 ? `${EXAM_PROMPT_TYPE_LABELS[index]}: ${levelParts.join(', ')}` : '';
+        })
+        .filter(Boolean);
+
+      return summaryParts.length > 0 ? `- ${lesson.lessonName}: ${summaryParts.join('; ')}.` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
 };
 
 const renderStructureLabel = (label: string) => {
@@ -2116,12 +2445,107 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         : '- Follow the exact question distribution that already appears in the uploaded specification table.';
       const questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
       const lessonBreakdownPrompt = buildLessonBreakdownFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
+      const lessonRequirements = extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
+      const assignedLessonRequirements = assignQuestionNumbersToLessonRequirements(lessonRequirements, examQuestionRanges);
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
 
+      if (assignedLessonRequirements.length > 0) {
+        const lessonQuestions: GeneratedExamQuestion[] = [];
+        let lessonPipelineFailed = false;
+        let lessonPipelineFeedback = '';
+
+        for (const lessonRequirement of assignedLessonRequirements) {
+          let lessonSuccess = false;
+          let lessonFeedback = '';
+
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            const prompt = buildLessonStructuredPrompt(
+              compactSpecsHtml,
+              lessonRequirement,
+              lessonFeedback,
+            );
+
+            try {
+              const result = await callGeminiAI(prompt, apiKey, model, {
+                temperature: attempt === 1 ? 0.1 : 0,
+                maxOutputTokens: 32768,
+                responseMimeType: 'application/json',
+              });
+
+              const lessonValidation = validateLessonStructuredPayload(result, lessonRequirement);
+              lessonFeedback = lessonValidation.summary;
+
+              if (!lessonValidation.isComplete) {
+                continue;
+              }
+
+              lessonQuestions.push(...lessonValidation.questions);
+              lessonSuccess = true;
+              break;
+            } catch (attemptError: any) {
+              lessonFeedback = attemptError?.message || `Không tạo được bài ${lessonRequirement.lessonName}.`;
+            }
+          }
+
+          if (!lessonSuccess) {
+            lessonPipelineFailed = true;
+            lessonPipelineFeedback = `${lessonRequirement.lessonName}: ${lessonFeedback || 'không tạo đủ câu'}`;
+            console.error('Lesson exam generation failed', {
+              lessonRequirement,
+              lessonFeedback,
+            });
+            break;
+          }
+        }
+
+        if (!lessonPipelineFailed) {
+          const normalizedQuestions = lessonQuestions.sort((a, b) => a.number - b.number);
+          const lessonFullValidation = validateStructuredExamPayload(
+            JSON.stringify({ questions: normalizedQuestions }),
+            effectiveQuestionCount,
+            examQuestionRanges,
+          );
+
+          if (lessonFullValidation.isComplete) {
+            const cleanHtml = buildExamHtmlFromStructuredQuestions(
+              lessonFullValidation.questions,
+              monHoc,
+              loaiKiemTra,
+              thoiGian,
+              examQuestionRanges,
+            );
+
+            const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+            const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+
+            if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
+              setExamHtml(cleanHtml);
+              setCurrentStep(4);
+              return;
+            }
+
+            console.error('Lesson pipeline rendered exam validation failed', {
+              questionSummary: questionContentValidation.summary,
+              answerSummary: answerKeyValidation.summary,
+            });
+          } else {
+            lessonPipelineFeedback = lessonFullValidation.summary;
+            console.error('Lesson pipeline combined validation failed', {
+              summary: lessonFullValidation.summary,
+            });
+          }
+        }
+
+        console.warn('Lesson pipeline failed, falling back to type-based generation', {
+          lessonPipelineFeedback,
+        });
+      }
+
       if (activeQuestionTypes.length > 0) {
         const combinedQuestions: GeneratedExamQuestion[] = [];
+        let chunkPipelineFailed = false;
         let lastStructuredIssue = '';
         let lastQuestionIssue = '';
         let lastAnswerIssue = '';
@@ -2172,52 +2596,59 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
               expectedType,
               chunkFeedback,
             });
-            throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+            chunkPipelineFailed = true;
+            break;
           }
         }
 
-        const normalizedQuestions = combinedQuestions.sort((a, b) => a.number - b.number);
-        const fullValidation = validateStructuredExamPayload(
-          JSON.stringify({ questions: normalizedQuestions }),
-          effectiveQuestionCount,
-          examQuestionRanges,
-        );
-
-        if (!fullValidation.isComplete) {
-          lastStructuredIssue = fullValidation.summary;
-          console.error('Combined structured exam validation failed', {
-            summary: fullValidation.summary,
+        if (!chunkPipelineFailed) {
+          const normalizedQuestions = combinedQuestions.sort((a, b) => a.number - b.number);
+          const fullValidation = validateStructuredExamPayload(
+            JSON.stringify({ questions: normalizedQuestions }),
             effectiveQuestionCount,
             examQuestionRanges,
-          });
-          throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+          );
+
+          if (fullValidation.isComplete) {
+            const cleanHtml = buildExamHtmlFromStructuredQuestions(
+              fullValidation.questions,
+              monHoc,
+              loaiKiemTra,
+              thoiGian,
+              examQuestionRanges,
+            );
+
+            const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+            lastQuestionIssue = questionContentValidation.summary;
+            const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+            lastAnswerIssue = answerKeyValidation.summary;
+
+            if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
+              setExamHtml(cleanHtml);
+              setCurrentStep(4);
+              return;
+            }
+
+            console.error('Rendered exam validation failed', {
+              lastStructuredIssue,
+              lastQuestionIssue,
+              lastAnswerIssue,
+            });
+          } else {
+            lastStructuredIssue = fullValidation.summary;
+            console.error('Combined structured exam validation failed', {
+              summary: fullValidation.summary,
+              effectiveQuestionCount,
+              examQuestionRanges,
+            });
+          }
         }
 
-        const cleanHtml = buildExamHtmlFromStructuredQuestions(
-          fullValidation.questions,
-          monHoc,
-          loaiKiemTra,
-          thoiGian,
-          examQuestionRanges,
-        );
-
-        const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
-        lastQuestionIssue = questionContentValidation.summary;
-        const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
-        lastAnswerIssue = answerKeyValidation.summary;
-
-        if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
-          setExamHtml(cleanHtml);
-          setCurrentStep(4);
-          return;
-        }
-
-        console.error('Rendered exam validation failed', {
+        console.warn('Structured chunk pipeline failed, falling back to broader generation', {
           lastStructuredIssue,
           lastQuestionIssue,
           lastAnswerIssue,
         });
-        throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
       }
 
       const structuredBasePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy tạo DỮ LIỆU CÂU HỎI CHUẨN HÓA cho đề kiểm tra.
@@ -2352,7 +2783,7 @@ LẦN THỬ ${attempt}:
         effectiveQuestionCount,
         examQuestionRanges,
       });
-      throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+      console.warn('Falling back to legacy HTML generation pipeline');
 
       const basePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
