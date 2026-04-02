@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r20';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r21';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -1998,11 +1998,8 @@ const sanitizePreviewText = (value: string) =>
     .replace(/\n{3,}/g, '\n\n');
 
 const buildWorkingHtmlFromImport = (html: string, title: string) => {
-  const text = sanitizePreviewText(htmlToPlainText(html))
-    .slice(0, MAX_IMPORTED_WORKING_TEXT_LENGTH)
-    .trim();
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><pre>${escapeHtml(text)}</pre></body></html>`;
+  void title;
+  return html;
 };
 
 const wrapPreviewText = (value: string, maxCharsPerLine: number) => {
