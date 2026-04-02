@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r24';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r26';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -727,6 +727,42 @@ const parseGeneratedExamPayload = (responseText: string) => {
   const jsonText = extractJsonDocumentFromResponse(responseText);
   const parsed = JSON.parse(jsonText) as unknown;
 
+  const flattenGroupedQuestions = (record: Record<string, unknown>) => {
+    const groupedQuestionConfigs: Array<{
+      key: string;
+      type: GeneratedQuestionType;
+      answerField?: string;
+    }> = [
+      { key: 'multipleChoiceQuestions', type: 'multiple_choice', answerField: 'answerText' },
+      { key: 'trueFalseQuestions', type: 'true_false', answerField: 'answerTokens' },
+      { key: 'shortAnswerQuestions', type: 'short_answer', answerField: 'answerText' },
+      { key: 'essayQuestions', type: 'essay' },
+    ];
+
+    const questions = groupedQuestionConfigs.flatMap(({ key, type, answerField }) => {
+      const items = record[key];
+      if (!Array.isArray(items)) {
+        return [];
+      }
+
+      return items.map((item) => {
+        const raw = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+        const normalized: Record<string, unknown> = {
+          ...raw,
+          type,
+        };
+
+        if (answerField && normalized.answer === undefined && raw[answerField] !== undefined) {
+          normalized.answer = raw[answerField];
+        }
+
+        return normalized;
+      });
+    });
+
+    return questions;
+  };
+
   if (Array.isArray(parsed)) {
     return { questions: parsed };
   }
@@ -741,6 +777,11 @@ const parseGeneratedExamPayload = (responseText: string) => {
       return { questions: Object.values(record.questions as Record<string, unknown>) };
     }
 
+    const flattenedGroupedQuestions = flattenGroupedQuestions(record);
+    if (flattenedGroupedQuestions.length > 0) {
+      return { questions: flattenedGroupedQuestions };
+    }
+
     const candidateKeys = ['items', 'data', 'result', 'exam', 'content'];
     for (const key of candidateKeys) {
       if (Array.isArray(record[key])) {
@@ -753,6 +794,11 @@ const parseGeneratedExamPayload = (responseText: string) => {
         }
         if (nested.questions && typeof nested.questions === 'object') {
           return { questions: Object.values(nested.questions as Record<string, unknown>) };
+        }
+
+        const nestedGroupedQuestions = flattenGroupedQuestions(nested);
+        if (nestedGroupedQuestions.length > 0) {
+          return { questions: nestedGroupedQuestions };
         }
       }
     }
@@ -803,6 +849,18 @@ const normalizeMultipleChoiceAnswer = (value: unknown) => {
   const normalized = normalizeStructuredTextValue(value).toUpperCase();
   const match = normalized.match(/[ABCD]/);
   return match ? match[0] : '';
+};
+
+const ensureShortAnswerPromptHasBlank = (prompt: string) => {
+  const normalizedPrompt = toCleanString(prompt);
+  if (!normalizedPrompt) return '';
+
+  if (/_{3,}|\.{3,}|…|điền|dien/i.test(normalizedPrompt)) {
+    return normalizedPrompt;
+  }
+
+  const trimmed = normalizedPrompt.replace(/[.:;\s]+$/, '');
+  return `${trimmed}: ..........`;
 };
 
 const normalizeStructuredTextValue = (value: unknown) => {
@@ -1035,7 +1093,19 @@ const validateStructuredExamPayload = (
       || getExpectedQuestionType(number, questionRanges)
       || inferredType;
     const answerGuide = provisionalAnswerGuide || normalizeStructuredTextValue(type === 'essay' ? raw.answer : '');
-    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
+    const rawAnswerValue = raw.answer
+      ?? raw.answerText
+      ?? raw.answer_text
+      ?? raw.answerTokens
+      ?? raw.answer_tokens
+      ?? raw.trueFalseAnswers
+      ?? raw.true_false_answers
+      ?? raw.correctAnswer
+      ?? raw.correct_answer
+      ?? raw.solution
+      ?? raw.key
+      ?? raw.dapAn
+      ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
@@ -1140,7 +1210,19 @@ const validateStructuredExamChunkPayload = (
     const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
     const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
     const rubric = normalizeRubricItems(raw.rubric);
-    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
+    const rawAnswerValue = raw.answer
+      ?? raw.answerText
+      ?? raw.answer_text
+      ?? raw.answerTokens
+      ?? raw.answer_tokens
+      ?? raw.trueFalseAnswers
+      ?? raw.true_false_answers
+      ?? raw.correctAnswer
+      ?? raw.correct_answer
+      ?? raw.solution
+      ?? raw.key
+      ?? raw.dapAn
+      ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
@@ -1243,7 +1325,19 @@ const validateLessonStructuredPayload = (
     const statements = normalizeOrderedStringArray(raw.statements ?? raw.items ?? raw.assertions ?? raw.subStatements ?? raw.phatBieu, ['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D']).slice(0, 4);
     const answerGuide = normalizeStructuredTextValue(raw.answerGuide ?? raw.guide ?? raw.explanation ?? raw.huongDan ?? raw.huong_dan ?? (type === 'essay' ? raw.answer : ''));
     const rubric = normalizeRubricItems(raw.rubric);
-    const rawAnswerValue = raw.answer ?? raw.correctAnswer ?? raw.correct_answer ?? raw.solution ?? raw.key ?? raw.dapAn ?? raw.dap_an;
+    const rawAnswerValue = raw.answer
+      ?? raw.answerText
+      ?? raw.answer_text
+      ?? raw.answerTokens
+      ?? raw.answer_tokens
+      ?? raw.trueFalseAnswers
+      ?? raw.true_false_answers
+      ?? raw.correctAnswer
+      ?? raw.correct_answer
+      ?? raw.solution
+      ?? raw.key
+      ?? raw.dapAn
+      ?? raw.dap_an;
 
     let answer: string | string[] | undefined;
     if (type === 'multiple_choice') {
@@ -1667,8 +1761,8 @@ ${lessonAssignmentText}
 
 BAT BUOC:
 - Chi tra ve 1 JSON object hop le, khong markdown, khong giai thich.
-- JSON phai co dung 1 khoa "questions".
-- Mang "questions" phai co dung ${effectiveQuestionCount} phan tu.
+- JSON phai co dung 4 khoa: "multipleChoiceQuestions", "trueFalseQuestions", "shortAnswerQuestions", "essayQuestions".
+- Tong so phan tu cua 4 mang cong lai phai dung ${effectiveQuestionCount}.
 - So thu tu phai day du va lien tuc: ${questionChecklist}.
 - Neu bai nao duoc giao cau nao thi phai tao dung cau do cho dung bai do.
 - Khong duoc doi loai cau giua cac dai so cau.
@@ -1677,36 +1771,38 @@ BAT BUOC:
 - Khong duoc bo sot cau tra loi ngan/dien khuyet.
 - Cau trac nghiem 1 dap an phai co du 4 lua chon A, B, C, D.
 - Cau dung/sai phai co du 4 menh de a, b, c, d va 4 dap an tuong ung.
-- Cau tra loi ngan phai co prompt day du va answer ngan chinh xac.
+- Cau tra loi ngan bat buoc la dang dien khuyet, trong prompt phai co cho trong nhu ".........." hoac "_____"; answer ngan chinh xac la phan dien vao cho trong.
 - Cau tu luan phai co answerGuide hoac rubric.
 - Moi chuoi phai bang tieng Viet va khong duoc rong.
 
 Schema bat buoc:
 {
-  "questions": [
+  "multipleChoiceQuestions": [
     {
       "number": 1,
-      "type": "multiple_choice",
       "prompt": "Noi dung cau hoi",
       "options": ["Phuong an A", "Phuong an B", "Phuong an C", "Phuong an D"],
-      "answer": "A"
-    },
+      "answerText": "A"
+    }
+  ],
+  "trueFalseQuestions": [
     {
       "number": 8,
-      "type": "true_false",
       "prompt": "De dan",
       "statements": ["Menh de a", "Menh de b", "Menh de c", "Menh de d"],
-      "answer": ["D", "S", "D", "S"]
-    },
+      "answerTokens": ["D", "S", "D", "S"]
+    }
+  ],
+  "shortAnswerQuestions": [
     {
       "number": 9,
-      "type": "short_answer",
-      "prompt": "Noi dung cau tra loi ngan/dien khuyet",
-      "answer": "Dap an ngan"
-    },
+      "prompt": "Gia tri cua bieu thuc A + B la: ..........",
+      "answerText": "Dap an ngan"
+    }
+  ],
+  "essayQuestions": [
     {
       "number": 10,
-      "type": "essay",
       "prompt": "Noi dung cau tu luan",
       "answerGuide": "Goi y dap an",
       "rubric": [
@@ -1719,6 +1815,99 @@ Schema bat buoc:
 
 CHI TRA VE JSON OBJECT DUY NHAT.`;
 };
+
+const SINGLE_PASS_EXAM_RESPONSE_SCHEMA = {
+  type: 'object',
+  propertyOrdering: [
+    'multipleChoiceQuestions',
+    'trueFalseQuestions',
+    'shortAnswerQuestions',
+    'essayQuestions',
+  ],
+  required: [
+    'multipleChoiceQuestions',
+    'trueFalseQuestions',
+    'shortAnswerQuestions',
+    'essayQuestions',
+  ],
+  properties: {
+    multipleChoiceQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        propertyOrdering: ['number', 'prompt', 'options', 'answerText'],
+        required: ['number', 'prompt', 'options', 'answerText'],
+        properties: {
+          number: { type: 'integer' },
+          prompt: { type: 'string' },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          answerText: { type: 'string' },
+        },
+      },
+    },
+    trueFalseQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        propertyOrdering: ['number', 'prompt', 'statements', 'answerTokens'],
+        required: ['number', 'prompt', 'statements', 'answerTokens'],
+        properties: {
+          number: { type: 'integer' },
+          prompt: { type: 'string' },
+          statements: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          answerTokens: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
+      },
+    },
+    shortAnswerQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        propertyOrdering: ['number', 'prompt', 'answerText'],
+        required: ['number', 'prompt', 'answerText'],
+        properties: {
+          number: { type: 'integer' },
+          prompt: { type: 'string' },
+          answerText: { type: 'string' },
+        },
+      },
+    },
+    essayQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        propertyOrdering: ['number', 'prompt', 'answerGuide', 'rubric'],
+        required: ['number', 'prompt'],
+        properties: {
+          number: { type: 'integer' },
+          prompt: { type: 'string' },
+          answerGuide: { type: 'string' },
+          rubric: {
+            type: 'array',
+            items: {
+              type: 'object',
+              propertyOrdering: ['content', 'points'],
+              required: ['content', 'points'],
+              properties: {
+                content: { type: 'string' },
+                points: { type: 'number' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
   if (question.type === 'multiple_choice') {
@@ -1782,6 +1971,18 @@ const renderQuestionHtml = (question: GeneratedExamQuestion) => {
       <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
     </div>
   `;
+};
+
+const renderExamQuestionHtml = (question: GeneratedExamQuestion) => {
+  if (question.type === 'short_answer') {
+    return `
+      <div class="question-block">
+        <p><span class="question-number">CÃ¢u ${question.number}.</span> ${escapeHtml(ensureShortAnswerPromptHasBlank(question.prompt))}</p>
+      </div>
+    `;
+  }
+
+  return renderQuestionHtml(question);
 };
 
 const buildScoringGuideHtml = (questions: GeneratedExamQuestion[]) => {
@@ -1851,7 +2052,7 @@ const buildExamHtmlFromStructuredQuestions = (
       return `
         <section class="exam-section">
           <h4>PHẦN ${item.roman}. ${QUESTION_SECTION_TITLES[item.type]}</h4>
-          ${sectionQuestions.map((question) => renderQuestionHtml(question)).join('')}
+          ${sectionQuestions.map((question) => renderExamQuestionHtml(question)).join('')}
         </section>
       `;
     }).join('');
@@ -1866,7 +2067,7 @@ const buildExamHtmlFromStructuredQuestions = (
       return `
         <section class="exam-section">
           <h4>PHẦN ${item.roman}. ${QUESTION_SECTION_TITLES[item.type]}</h4>
-          ${sectionQuestions.map((question) => renderQuestionHtml(question)).join('')}
+          ${sectionQuestions.map((question) => renderExamQuestionHtml(question)).join('')}
         </section>
       `;
     }).join('');
@@ -2241,6 +2442,27 @@ const extractLessonRequirementsFromMatrix = (
     essay: createEmptyLevelCountMap(),
   } satisfies Record<GeneratedQuestionType, LevelCountMap>);
 
+  const getRowCellTexts = (row: Element) =>
+    Array.from(row.querySelectorAll('td,th'))
+      .map((cell) => (cell.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim());
+
+  const isNumericLikeCell = (value: string) => /^\d+(?:[.,]\d+)?$/.test(value.trim());
+
+  const findQuestionCountBlockStart = (cellTexts: string[], minStartIndex: number) => {
+    for (let startIndex = Math.max(0, minStartIndex); startIndex <= cellTexts.length - requiredValueCells; startIndex += 1) {
+      const window = cellTexts.slice(startIndex, startIndex + requiredValueCells);
+      const nonEmptyCells = window.filter((cellText) => cellText !== '');
+      const hasAnyCount = nonEmptyCells.some((cellText) => extractIntegerFromCell(cellText) > 0);
+      const hasOnlyNumericOrEmptyValues = nonEmptyCells.every((cellText) => isNumericLikeCell(cellText));
+
+      if (hasAnyCount && hasOnlyNumericOrEmptyValues) {
+        return startIndex;
+      }
+    }
+
+    return -1;
+  };
+
   const fillCountsByType = (valueCells: string[]) => {
     const countsByType = createCountsByType();
 
@@ -2271,25 +2493,30 @@ const extractLessonRequirementsFromMatrix = (
     const seenLessonNames = new Set<string>();
 
     rows.forEach((row) => {
-      const cellTexts = Array.from(row.querySelectorAll('td,th'))
-        .map((cell) => (cell.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
-        .filter(Boolean);
+      const cellTexts = getRowCellTexts(row);
 
       if (cellTexts.length < requiredValueCells + 1) return;
 
-      const valueCells = cellTexts.slice(-requiredValueCells);
-      const hasAnyCount = valueCells.some((cellText) => extractIntegerFromCell(cellText) > 0);
-      if (!hasAnyCount) return;
+      const blockStartIndex = findQuestionCountBlockStart(cellTexts, 1);
+      if (blockStartIndex === -1) return;
 
-      const lessonCellIndex = cellTexts.length - requiredValueCells - 1;
-      const lessonName = cellTexts[lessonCellIndex] || '';
+      const valueCells = cellTexts.slice(blockStartIndex, blockStartIndex + requiredValueCells);
+      const candidateTextCells = cellTexts
+        .slice(0, blockStartIndex)
+        .map((cellText, index) => ({ cellText, index }))
+        .filter(({ cellText }) => cellText && !isSummaryLikeText(cellText));
+
+      if (candidateTextCells.length === 0) return;
+
+      const lessonCell = candidateTextCells[candidateTextCells.length - 1];
+      const lessonName = lessonCell?.cellText || '';
       const normalizedLessonName = normalizeTextForMatch(lessonName);
 
       if (!lessonName || !normalizedLessonName || isSummaryLikeText(lessonName) || seenLessonNames.has(normalizedLessonName)) {
         return;
       }
 
-      const chapterCandidate = lessonCellIndex > 0 ? cellTexts[lessonCellIndex - 1] || '' : '';
+      const chapterCandidate = candidateTextCells.length > 1 ? candidateTextCells[candidateTextCells.length - 2].cellText || '' : '';
       const chapterName = isSummaryLikeText(chapterCandidate) ? '' : chapterCandidate;
 
       genericRequirements.push({
@@ -2310,11 +2537,9 @@ const extractLessonRequirementsFromMatrix = (
   rows.forEach((row) => {
     if (lessonCursor >= selectedLessonItems.length) return;
 
-    const cellTexts = Array.from(row.querySelectorAll('td,th'))
-      .map((cell) => (cell.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
+    const cellTexts = getRowCellTexts(row);
 
-    if (cellTexts.length === 0) return;
+    if (cellTexts.every((cellText) => cellText === '')) return;
 
     const rowText = normalizeTextForMatch(cellTexts.join(' '));
     const currentLesson = selectedLessonItems[lessonCursor];
@@ -2328,7 +2553,10 @@ const extractLessonRequirementsFromMatrix = (
 
     if (lessonCellIndex === -1) return;
 
-    const valueCells = cellTexts.slice(lessonCellIndex + 1, lessonCellIndex + 1 + requiredValueCells);
+    const blockStartIndex = findQuestionCountBlockStart(cellTexts, lessonCellIndex + 1);
+    if (blockStartIndex === -1) return;
+
+    const valueCells = cellTexts.slice(blockStartIndex, blockStartIndex + requiredValueCells);
     if (valueCells.length < requiredValueCells) return;
 
     lessonRequirements.push({
@@ -3041,6 +3269,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
           temperature: 0,
           maxOutputTokens: 32768,
           responseMimeType: 'application/json',
+          responseSchema: SINGLE_PASS_EXAM_RESPONSE_SCHEMA,
         });
 
         const structuredValidation = validateStructuredExamPayload(singlePassResult, effectiveQuestionCount, examQuestionRanges);
