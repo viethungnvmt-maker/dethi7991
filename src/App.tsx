@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r4';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r7';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -424,6 +424,15 @@ interface StructuredExamValidationResult {
   questions: GeneratedExamQuestion[];
 }
 
+interface StructuredExamChunkValidationResult {
+  isComplete: boolean;
+  presentQuestionCount: number;
+  missingQuestions: number[];
+  invalidQuestions: number[];
+  summary: string;
+  questions: GeneratedExamQuestion[];
+}
+
 const stripQuestionLabel = (value: string) =>
   value.replace(/^\s*Câu\s*\d+\s*[:.)-]?\s*/i, '').trim();
 
@@ -594,6 +603,13 @@ const QUESTION_SECTION_TITLES: Record<GeneratedQuestionType, string> = {
   essay: 'TỰ LUẬN',
 };
 
+const QUESTION_TYPE_PROMPT_LABELS: Record<GeneratedQuestionType, string> = {
+  multiple_choice: 'trắc nghiệm 1 đáp án',
+  true_false: 'đúng/sai',
+  short_answer: 'trả lời ngắn/điền khuyết',
+  essay: 'tự luận',
+};
+
 const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
 const toCleanString = (value: unknown) =>
@@ -711,6 +727,46 @@ const hasMeaningfulAnswerValue = (value: string) => {
   return !/^(?:[.·…_\-\s]+)$/.test(normalized);
 };
 
+const isGeneratedQuestionValidForType = (
+  question: GeneratedExamQuestion,
+  expectedType: GeneratedQuestionType,
+) => {
+  if (question.type !== expectedType) {
+    return false;
+  }
+
+  if (expectedType === 'multiple_choice') {
+    return hasMeaningfulQuestionText(question.prompt, 8)
+      && Array.isArray(question.options)
+      && question.options.length === 4
+      && question.options.every((option) => hasMeaningfulAnswerValue(option))
+      && typeof question.answer === 'string'
+      && /^[ABCD]$/.test(question.answer);
+  }
+
+  if (expectedType === 'true_false') {
+    return hasMeaningfulQuestionText(question.prompt, 8)
+      && Array.isArray(question.statements)
+      && question.statements.length === 4
+      && question.statements.every((statement) => hasMeaningfulQuestionText(statement, 3))
+      && Array.isArray(question.answer)
+      && question.answer.length === 4
+      && question.answer.every((token) => token === 'Đ' || token === 'S');
+  }
+
+  if (expectedType === 'short_answer') {
+    return hasMeaningfulQuestionText(question.prompt, 8)
+      && typeof question.answer === 'string'
+      && hasMeaningfulAnswerValue(question.answer);
+  }
+
+  return hasMeaningfulQuestionText(question.prompt, 8)
+    && (
+      hasMeaningfulAnswerValue(question.answerGuide || '')
+      || (Array.isArray(question.rubric) && question.rubric.length > 0)
+    );
+};
+
 const validateStructuredExamPayload = (
   responseText: string,
   totalQuestions: number,
@@ -783,36 +839,7 @@ const validateStructuredExamPayload = (
       continue;
     }
 
-    let isValidQuestion = false;
-
-    if (question.type === 'multiple_choice') {
-      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
-        && Array.isArray(question.options)
-        && question.options.length === 4
-        && question.options.every((option) => hasMeaningfulAnswerValue(option))
-        && typeof question.answer === 'string'
-        && /^[ABCD]$/.test(question.answer);
-    } else if (question.type === 'true_false') {
-      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
-        && Array.isArray(question.statements)
-        && question.statements.length === 4
-        && question.statements.every((statement) => hasMeaningfulQuestionText(statement, 3))
-        && Array.isArray(question.answer)
-        && question.answer.length === 4
-        && question.answer.every((token) => token === 'Đ' || token === 'S');
-    } else if (question.type === 'short_answer') {
-      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
-        && typeof question.answer === 'string'
-        && hasMeaningfulAnswerValue(question.answer);
-    } else {
-      isValidQuestion = hasMeaningfulQuestionText(question.prompt, 8)
-        && (
-          hasMeaningfulAnswerValue(question.answerGuide || '')
-          || (Array.isArray(question.rubric) && question.rubric.length > 0)
-        );
-    }
-
-    if (!isValidQuestion) {
+    if (!isGeneratedQuestionValidForType(question, expectedType)) {
       invalidQuestions.push(questionNumber);
       continue;
     }
@@ -839,6 +866,167 @@ const validateStructuredExamPayload = (
     summary: summaryParts.join('; ') || 'đủ dữ liệu cấu trúc cho tất cả câu',
     questions: validQuestions.sort((a, b) => a.number - b.number),
   };
+};
+
+const validateStructuredExamChunkPayload = (
+  responseText: string,
+  range: QuestionRange,
+  expectedType: GeneratedQuestionType,
+): StructuredExamChunkValidationResult => {
+  const payload = parseGeneratedExamPayload(responseText);
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  const normalizedQuestions = new Map<number, GeneratedExamQuestion>();
+  const missingQuestions: number[] = [];
+  const invalidQuestions: number[] = [];
+  const validQuestions: GeneratedExamQuestion[] = [];
+
+  rawQuestions.forEach((item) => {
+    const raw = item as Record<string, unknown>;
+    const number = typeof raw.number === 'number'
+      ? raw.number
+      : Number(String(raw.number ?? '').trim());
+
+    if (!Number.isFinite(number) || number <= 0) {
+      return;
+    }
+
+    if (normalizedQuestions.has(number)) {
+      invalidQuestions.push(number);
+      return;
+    }
+
+    const type = normalizeGeneratedQuestionType(raw.type);
+    const prompt = toCleanString(raw.prompt ?? raw.content ?? raw.question);
+    const options = Array.isArray(raw.options) ? raw.options.map((option) => toCleanString(option)).filter(Boolean) : [];
+    const statements = Array.isArray(raw.statements) ? raw.statements.map((statement) => toCleanString(statement)).filter(Boolean) : [];
+    const answerGuide = toCleanString(raw.answerGuide ?? raw.guide ?? raw.explanation);
+    const rubric = normalizeRubricItems(raw.rubric);
+
+    let answer: string | string[] | undefined;
+    if (type === 'multiple_choice') {
+      answer = normalizeMultipleChoiceAnswer(raw.answer);
+    } else if (type === 'true_false') {
+      answer = normalizeTrueFalseAnswers(raw.answer);
+    } else {
+      answer = toCleanString(raw.answer);
+    }
+
+    normalizedQuestions.set(number, {
+      number,
+      type: type || 'short_answer',
+      prompt,
+      options,
+      statements,
+      answer,
+      answerGuide,
+      rubric,
+    });
+  });
+
+  for (const questionNumber of normalizedQuestions.keys()) {
+    if (questionNumber < range.start || questionNumber > range.end) {
+      invalidQuestions.push(questionNumber);
+    }
+  }
+
+  for (let questionNumber = range.start; questionNumber <= range.end; questionNumber += 1) {
+    const question = normalizedQuestions.get(questionNumber);
+
+    if (!question) {
+      missingQuestions.push(questionNumber);
+      continue;
+    }
+
+    if (!isGeneratedQuestionValidForType(question, expectedType)) {
+      invalidQuestions.push(questionNumber);
+      continue;
+    }
+
+    validQuestions.push(question);
+  }
+
+  const summaryParts: string[] = [];
+  if (missingQuestions.length > 0) {
+    summaryParts.push(`thiếu câu ${formatQuestionNumberList(missingQuestions)}`);
+  }
+  if (invalidQuestions.length > 0) {
+    summaryParts.push(`sai dữ liệu ở câu ${formatQuestionNumberList(invalidQuestions)}`);
+  }
+
+  return {
+    isComplete: missingQuestions.length === 0 && invalidQuestions.length === 0 && validQuestions.length === range.total,
+    presentQuestionCount: validQuestions.length,
+    missingQuestions,
+    invalidQuestions,
+    summary: summaryParts.join('; ') || `đủ ${range.total} câu ${QUESTION_TYPE_PROMPT_LABELS[expectedType]}`,
+    questions: validQuestions.sort((a, b) => a.number - b.number),
+  };
+};
+
+const buildQuestionNumberRangeChecklist = (start: number, end: number) =>
+  Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => `Câu ${start + index}`).join(', ');
+
+const buildStructuredChunkPrompt = (
+  compactSpecsHtml: string,
+  lessonBreakdownPrompt: string,
+  examTypeRequirements: string,
+  range: QuestionRange,
+  questionType: GeneratedQuestionType,
+  previousFeedback: string,
+) => {
+  const questionChecklist = buildQuestionNumberRangeChecklist(range.start, range.end);
+
+  const typeSpecificInstruction = questionType === 'multiple_choice'
+    ? `Mỗi câu phải có:
+- "type": "multiple_choice"
+- "prompt": nội dung câu hỏi đầy đủ
+- "options": mảng đúng 4 phần tử A, B, C, D
+- "answer": đúng 1 ký tự A hoặc B hoặc C hoặc D`
+    : questionType === 'true_false'
+      ? `Mỗi câu phải có:
+- "type": "true_false"
+- "prompt": đề dẫn đầy đủ
+- "statements": mảng đúng 4 mệnh đề a, b, c, d
+- "answer": mảng đúng 4 phần tử chỉ gồm "Đ" hoặc "S"`
+      : questionType === 'short_answer'
+        ? `Mỗi câu phải có:
+- "type": "short_answer"
+- "prompt": nội dung câu điền khuyết/trả lời ngắn đầy đủ
+- "answer": đáp án ngắn chính xác`
+        : `Mỗi câu phải có:
+- "type": "essay"
+- "prompt": nội dung câu tự luận đầy đủ
+- "answerGuide": gợi ý đáp án
+- hoặc "rubric": mảng chấm điểm chi tiết`;
+
+  return `Dựa trên Bảng đặc tả sau, hãy chỉ tạo NHÓM CÂU thuộc dạng ${QUESTION_TYPE_PROMPT_LABELS[questionType]}.
+
+BẢNG ĐẶC TẢ:
+${compactSpecsHtml}
+
+PHÂN BỔ TỪNG DẠNG:
+${examTypeRequirements}
+
+${lessonBreakdownPrompt ? `PHÂN BỔ THEO BÀI:
+${lessonBreakdownPrompt}
+` : ''}
+
+YÊU CẦU CỦA LẦN TẠO NÀY:
+- Chỉ tạo các câu từ Câu ${range.start} đến Câu ${range.end}.
+- Tổng số câu cần tạo trong lần này: ${range.total}.
+- Không được tạo câu ngoài dải số trên.
+- Các số câu bắt buộc phải đủ: ${questionChecklist}.
+- Mọi câu phải là câu thật, không được placeholder, không được ghi "...".
+- ${previousFeedback ? `Lỗi lần trước cần tránh: ${previousFeedback}.` : 'Phải trả đúng đủ ngay trong lần này.'}
+
+${typeSpecificInstruction}
+
+CHỈ TRẢ VỀ JSON OBJECT:
+{
+  "questions": [
+    ...
+  ]
+}`;
 };
 
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
@@ -1897,6 +2085,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
   const handleGenerateExam = async () => {
     if (!specsHtml) return;
+    setExamHtml('');
     setIsGenerating(true);
     await waitForNextPaint();
     try {
@@ -1930,6 +2119,106 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
+
+      if (activeQuestionTypes.length > 0) {
+        const combinedQuestions: GeneratedExamQuestion[] = [];
+        let lastStructuredIssue = '';
+        let lastQuestionIssue = '';
+        let lastAnswerIssue = '';
+
+        for (const range of activeQuestionTypes) {
+          const expectedType = getExpectedQuestionType(range.start, examQuestionRanges);
+          if (!expectedType) continue;
+
+          let chunkSuccess = false;
+          let chunkFeedback = '';
+
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            const prompt = buildStructuredChunkPrompt(
+              compactSpecsHtml,
+              lessonBreakdownPrompt,
+              examTypeRequirements,
+              range,
+              expectedType,
+              chunkFeedback,
+            );
+
+            try {
+              const result = await callGeminiAI(prompt, apiKey, model, {
+                temperature: attempt === 1 ? 0.1 : 0,
+                maxOutputTokens: 32768,
+                responseMimeType: 'application/json',
+              });
+
+              const chunkValidation = validateStructuredExamChunkPayload(result, range, expectedType);
+              chunkFeedback = chunkValidation.summary;
+
+              if (!chunkValidation.isComplete) {
+                continue;
+              }
+
+              combinedQuestions.push(...chunkValidation.questions);
+              chunkSuccess = true;
+              break;
+            } catch (attemptError: any) {
+              chunkFeedback = attemptError?.message || `Không tạo được nhóm câu ${range.start}-${range.end}.`;
+            }
+          }
+
+          if (!chunkSuccess) {
+            lastStructuredIssue = `${QUESTION_TYPE_PROMPT_LABELS[expectedType]} (${range.start}-${range.end}): ${chunkFeedback || 'không tạo đủ câu'}`;
+            console.error('Chunk exam generation failed', {
+              range,
+              expectedType,
+              chunkFeedback,
+            });
+            throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+          }
+        }
+
+        const normalizedQuestions = combinedQuestions.sort((a, b) => a.number - b.number);
+        const fullValidation = validateStructuredExamPayload(
+          JSON.stringify({ questions: normalizedQuestions }),
+          effectiveQuestionCount,
+          examQuestionRanges,
+        );
+
+        if (!fullValidation.isComplete) {
+          lastStructuredIssue = fullValidation.summary;
+          console.error('Combined structured exam validation failed', {
+            summary: fullValidation.summary,
+            effectiveQuestionCount,
+            examQuestionRanges,
+          });
+          throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+        }
+
+        const cleanHtml = buildExamHtmlFromStructuredQuestions(
+          fullValidation.questions,
+          monHoc,
+          loaiKiemTra,
+          thoiGian,
+          examQuestionRanges,
+        );
+
+        const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+        lastQuestionIssue = questionContentValidation.summary;
+        const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+        lastAnswerIssue = answerKeyValidation.summary;
+
+        if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
+          setExamHtml(cleanHtml);
+          setCurrentStep(4);
+          return;
+        }
+
+        console.error('Rendered exam validation failed', {
+          lastStructuredIssue,
+          lastQuestionIssue,
+          lastAnswerIssue,
+        });
+        throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+      }
 
       const structuredBasePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy tạo DỮ LIỆU CÂU HỎI CHUẨN HÓA cho đề kiểm tra.
 
@@ -2056,7 +2345,14 @@ LẦN THỬ ${attempt}:
         }
       }
 
-      throw new Error(`Đề thi AI chưa đạt sau 3 lần thử. Dữ liệu câu hỏi gần nhất: ${structuredQuestionFeedback}. Phần thân đề gần nhất: ${structuredQuestionContentFeedback}. Bảng đáp án gần nhất: ${structuredAnswerKeyFeedback}. Vui lòng bấm tạo lại.`);
+      console.error('Exam generation validation failed', {
+        structuredQuestionFeedback,
+        structuredQuestionContentFeedback,
+        structuredAnswerKeyFeedback,
+        effectiveQuestionCount,
+        examQuestionRanges,
+      });
+      throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
 
       const basePrompt = `Dựa trên Bảng đặc tả (HTML) sau, hãy soạn ĐỀ THI HOÀN CHỈNH và HƯỚNG DẪN CHẤM.
 
@@ -2179,9 +2475,13 @@ LẦN THỬ ${attempt}:
 
       throw new Error(`Đề thi AI chưa đạt sau 3 lần thử. Phần thân đề gần nhất: ${questionContentFeedback}. Bảng đáp án gần nhất: ${answerKeyFeedback}. Vui lòng bấm tạo lại.`);
     } catch (error: any) {
+      setExamHtml('');
+      console.error('Generate exam error:', error);
+      const rawMessage = typeof error?.message === 'string' ? error.message : '';
+      const userMessage = rawMessage || 'Không thể tạo đề thi ở lần này. Vui lòng thử lại.';
       Swal.fire({
-        title: 'Lỗi tạo đề thi',
-        text: error.message,
+        title: 'Chưa tạo được đề',
+        text: userMessage,
         icon: 'error',
         confirmButtonColor: '#2dd4a8',
         background: '#132a1f',
