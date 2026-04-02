@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r10';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r11';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -1288,6 +1288,92 @@ CHỈ TRẢ VỀ JSON OBJECT:
 }`;
 };
 
+const buildSinglePassExamPrompt = (
+  compactSpecsHtml: string,
+  examTypeRequirements: string,
+  assignedLessonRequirements: AssignedLessonRequirement[],
+  effectiveQuestionCount: number,
+  questionChecklist: string,
+  questionRangePrompt: string,
+) => {
+  const lessonAssignmentText = assignedLessonRequirements.length > 0
+    ? assignedLessonRequirements.map((lesson) => {
+      const assignmentLines = lesson.assignments.map((assignment) => {
+        const numbers = assignment.numbers.map((number) => `Câu ${number}`).join(', ');
+        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dùng đúng các số câu: ${numbers}.`;
+      }).join('\n');
+
+      return `- Chương: ${lesson.chapterName}\n  Bài: ${lesson.lessonName}\n${assignmentLines}`;
+    }).join('\n')
+    : '- Không trích được phân bố theo từng bài từ ma trận, hãy bám đúng cấu trúc tổng thể bên dưới.';
+
+  return `Dựa trên bảng đặc tả sau, hãy tạo TOÀN BỘ dữ liệu câu hỏi cho đề kiểm tra chỉ trong MỘT lần trả lời.
+
+BẢNG ĐẶC TẢ:
+${compactSpecsHtml}
+
+CẤU TRÚC TỔNG THỂ BẮT BUỘC:
+- Tổng số câu toàn đề: ${effectiveQuestionCount}
+${questionRangePrompt}
+
+PHÂN BỔ TỪNG DẠNG:
+${examTypeRequirements}
+
+PHÂN BỔ CHI TIẾT THEO TỪNG BÀI:
+${lessonAssignmentText}
+
+QUY TẮC CỰC KỲ QUAN TRỌNG:
+- Chỉ trả lời MỘT LẦN bằng JSON hoàn chỉnh.
+- Phải tạo đủ toàn bộ các câu từ Câu 1 đến Câu ${effectiveQuestionCount}.
+- Các số câu bắt buộc phải đủ: ${questionChecklist}.
+- Nếu bài nào được giao số câu nào thì phải tạo đúng số câu đó cho đúng bài đó.
+- Không được bỏ sót câu trắc nghiệm 1 đáp án.
+- Không được bỏ sót câu trả lời ngắn/điền khuyết.
+- Không được đổi loại câu giữa các dải số câu.
+- Mỗi câu phải là câu thật, đầy đủ nội dung, không placeholder, không "...".
+- Câu trắc nghiệm 1 đáp án phải có đủ 4 lựa chọn A, B, C, D.
+- Câu đúng/sai phải có đủ 4 mệnh đề a, b, c, d và 4 đáp án tương ứng.
+- Câu trả lời ngắn phải có prompt đầy đủ và đáp án ngắn chính xác.
+- Câu tự luận phải có answerGuide hoặc rubric.
+- Mọi chuỗi phải bằng tiếng Việt và không được rỗng.
+
+CHỈ TRẢ VỀ JSON OBJECT, KHÔNG markdown, KHÔNG HTML, KHÔNG giải thích.
+Schema bắt buộc:
+{
+  "questions": [
+    {
+      "number": 1,
+      "type": "multiple_choice",
+      "prompt": "Nội dung câu hỏi",
+      "options": ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
+      "answer": "A"
+    },
+    {
+      "number": 8,
+      "type": "true_false",
+      "prompt": "Đề dẫn",
+      "statements": ["Mệnh đề a", "Mệnh đề b", "Mệnh đề c", "Mệnh đề d"],
+      "answer": ["Đ", "S", "Đ", "S"]
+    },
+    {
+      "number": 9,
+      "type": "short_answer",
+      "prompt": "Nội dung câu trả lời ngắn/điền khuyết",
+      "answer": "Đáp án ngắn"
+    },
+    {
+      "number": 10,
+      "type": "essay",
+      "prompt": "Nội dung câu tự luận",
+      "answerGuide": "Gợi ý đáp án",
+      "rubric": [
+        { "content": "Ý 1", "points": 0.5 }
+      ]
+    }
+  ]
+}`;
+};
+
 const renderAnswerCellValue = (question: GeneratedExamQuestion) => {
   if (question.type === 'multiple_choice') {
     return typeof question.answer === 'string' ? question.answer : '';
@@ -2450,6 +2536,63 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
+
+      const shouldUseSingleCallPrompt = true as boolean;
+      if (shouldUseSingleCallPrompt) {
+        const singlePassPrompt = buildSinglePassExamPrompt(
+          compactSpecsHtml,
+          examTypeRequirements,
+          assignedLessonRequirements,
+          effectiveQuestionCount,
+          questionChecklist,
+          questionRangePrompt,
+        );
+
+        const singlePassResult = await callGeminiAI(singlePassPrompt, apiKey, model, {
+          temperature: 0.05,
+          maxOutputTokens: 32768,
+          responseMimeType: 'application/json',
+        });
+
+        const structuredValidation = validateStructuredExamPayload(
+          singlePassResult,
+          effectiveQuestionCount,
+          examQuestionRanges,
+        );
+
+        if (!structuredValidation.isComplete) {
+          console.error('Single-pass exam generation failed', {
+            summary: structuredValidation.summary,
+            effectiveQuestionCount,
+            examQuestionRanges,
+            assignedLessonRequirements,
+          });
+          throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+        }
+
+        const cleanHtml = buildExamHtmlFromStructuredQuestions(
+          structuredValidation.questions,
+          monHoc,
+          loaiKiemTra,
+          thoiGian,
+          examQuestionRanges,
+        );
+
+        const questionContentValidation = validateQuestionContentCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+        const answerKeyValidation = validateAnswerKeyCoverage(cleanHtml, effectiveQuestionCount, examQuestionRanges);
+
+        if (!questionContentValidation.isComplete || !answerKeyValidation.isComplete) {
+          console.error('Single-pass rendered exam validation failed', {
+            questionSummary: questionContentValidation.summary,
+            answerSummary: answerKeyValidation.summary,
+          });
+          throw new Error('AI chưa tạo đủ đề theo đúng cấu trúc yêu cầu. Vui lòng bấm tạo lại.');
+        }
+
+        setExamHtml(cleanHtml);
+        setCurrentStep(4);
+        return;
+      }
 
       if (assignedLessonRequirements.length > 0) {
         const lessonQuestions: GeneratedExamQuestion[] = [];
