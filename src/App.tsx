@@ -30,7 +30,7 @@ const STEPS = [
   { id: 4, title: 'Đề thi' },
 ];
 
-const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r26';
+const APP_BUILD_NAME = import.meta.env.VITE_BUILD_NAME || '2026.04.02-r27';
 
 const MON_HOC_LIST = [
   'Toán', 'Ngữ văn', 'Vật lí', 'Hóa học', 'Sinh học',
@@ -93,6 +93,8 @@ const STRUCTURE_LEVELS = [
 
 type StructureLevelKey = typeof STRUCTURE_LEVELS[number]['key'];
 type StructureMetricKey = 'count' | 'score';
+const TRUE_FALSE_ROW_INDEX = 1;
+const TRUE_FALSE_STATEMENTS_PER_QUESTION = 4;
 
 const createStructureCell = () => ({ count: 0, score: 0 });
 
@@ -169,6 +171,19 @@ const calculateTotalQuestions = (rows: ExamStructureRow[]) =>
     0,
   );
 
+const convertTrueFalseStatementCountToQuestionCount = (statementCount: number) =>
+  statementCount <= 0 ? 0 : Math.ceil(statementCount / TRUE_FALSE_STATEMENTS_PER_QUESTION);
+
+const calculateDisplayedQuestionCountForRow = (row: ExamStructureRow, index: number) => {
+  const rawCount = STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count, 0);
+  return index === TRUE_FALSE_ROW_INDEX
+    ? convertTrueFalseStatementCountToQuestionCount(rawCount)
+    : rawCount;
+};
+
+const calculateTotalDisplayedQuestions = (rows: ExamStructureRow[]) =>
+  rows.reduce((sum, row, index) => sum + calculateDisplayedQuestionCountForRow(row, index), 0);
+
 const calculateTotalPoints = (rows: ExamStructureRow[]) =>
   rows.reduce(
     (sum, row) =>
@@ -181,6 +196,17 @@ const calculateRowTotals = (row: ExamStructureRow) => ({
   score: STRUCTURE_LEVELS.reduce((sum, level) => sum + row[level.key].count * row[level.key].score, 0),
 });
 
+const isTrueFalseStructureRow = (row: ExamStructureRow) => {
+  const normalized = normalizeAsciiText(row.label);
+  return normalized.includes('dung/sai') || normalized.includes('dung sai');
+};
+
+const getStructureCountUnitLabel = (row: ExamStructureRow) =>
+  isTrueFalseStructureRow(row) ? 'má»‡nh Ä‘á»' : 'cÃ¢u';
+
+const getStructureCountUnitLabelV2 = (row: ExamStructureRow) =>
+  isTrueFalseStructureRow(row) ? 'menh de' : 'cau';
+
 const MAX_PROMPT_HTML_TEXT_LENGTH = 12_000;
 const MAX_IMPORTED_WORKING_TEXT_LENGTH = 16_000;
 
@@ -192,8 +218,8 @@ const compactHtmlForPrompt = (html: string) =>
 const buildExamQuestionRanges = (rows: ExamStructureRow[]) => {
   let currentQuestion = 1;
 
-  return rows.map((row) => {
-    const total = calculateRowTotals(row).count;
+  return rows.map((row, index) => {
+    const total = calculateDisplayedQuestionCountForRow(row, index);
     if (total === 0) {
       return { label: row.label, total, start: 0, end: 0 };
     }
@@ -493,6 +519,12 @@ interface AssignedLessonRequirement {
   totalQuestions: number;
 }
 
+const stripLeadingOptionLabel = (value: string) =>
+  value.replace(/^\s*[A-D][).:-]\s*/i, '').trim();
+
+const stripLeadingStatementLabel = (value: string) =>
+  value.replace(/^\s*[a-dA-D][).:-]\s*/i, '').trim();
+
 const stripQuestionLabel = (value: string) =>
   value.replace(/^\s*Câu\s*\d+\s*[:.)-]?\s*/i, '').trim();
 
@@ -655,6 +687,19 @@ const QUESTION_TYPE_SEQUENCE: GeneratedQuestionType[] = [
   'short_answer',
   'essay',
 ];
+
+const getQuestionTypeUnitLabel = (questionType: GeneratedQuestionType) =>
+  questionType === 'true_false' ? 'má»‡nh Ä‘á»' : 'cÃ¢u';
+
+const getQuestionTypeUnitLabelV2 = (questionType: GeneratedQuestionType) =>
+  questionType === 'true_false' ? 'menh de' : 'cau';
+
+const convertQuestionUnitCountToDisplayCount = (
+  questionType: GeneratedQuestionType,
+  unitCount: number,
+) => questionType === 'true_false'
+  ? convertTrueFalseStatementCountToQuestionCount(unitCount)
+  : unitCount;
 
 const QUESTION_SECTION_TITLES: Record<GeneratedQuestionType, string> = {
   multiple_choice: 'TRẮC NGHIỆM NHIỀU LỰA CHỌN',
@@ -1404,9 +1449,24 @@ const validateLessonStructuredPayload = (
 const buildQuestionNumberRangeChecklist = (start: number, end: number) =>
   Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => `Câu ${start + index}`).join(', ');
 
-const formatLessonLevelBreakdown = (levels: LevelCountMap) =>
+const formatLessonLevelBreakdown = (
+  levels: LevelCountMap,
+  questionType?: GeneratedQuestionType,
+) =>
   STRUCTURE_LEVELS
     .map(({ key, label }) => (levels[key] > 0 ? `${levels[key]} câu ${label.toLowerCase()}` : ''))
+    .filter(Boolean)
+    .join(', ');
+
+const formatLessonLevelBreakdownForQuestionType = (
+  levels: LevelCountMap,
+  questionType: GeneratedQuestionType,
+) =>
+  STRUCTURE_LEVELS
+    .map(({ key, label }) => {
+      if (levels[key] <= 0) return '';
+      return `${levels[key]} ${getQuestionTypeUnitLabelV2(questionType)} ${label.toLowerCase()}`;
+    })
     .filter(Boolean)
     .join(', ');
 
@@ -1473,6 +1533,25 @@ CHỈ TRẢ VỀ JSON OBJECT:
 }`;
 };
 
+const buildAssignmentQuestionTargetList = (assignment: LessonQuestionAssignment) => {
+  if (assignment.type !== 'true_false') {
+    return assignment.numbers.map((number) => `Cau ${number}`);
+  }
+
+  const statementIndexByQuestion = new Map<number, number>();
+
+  return assignment.numbers.map((number) => {
+    const nextIndex = (statementIndexByQuestion.get(number) || 0) + 1;
+    statementIndexByQuestion.set(number, nextIndex);
+    const statementLabel = String.fromCharCode(96 + Math.min(nextIndex, TRUE_FALSE_STATEMENTS_PER_QUESTION));
+    return `Cau ${number} (${statementLabel})`;
+  });
+};
+
+const buildAssignmentQuestionTargets = (assignment: LessonQuestionAssignment) => {
+  return buildAssignmentQuestionTargetList(assignment).join(', ');
+};
+
 const buildLessonStructuredPrompt = (
   compactSpecsHtml: string,
   lessonRequirement: AssignedLessonRequirement,
@@ -1530,6 +1609,23 @@ const buildLessonAssignmentDetails = (assignment: LessonQuestionAssignment) => {
   return parts.join('; ');
 };
 
+const buildLessonAssignmentDetailsV2 = (assignment: LessonQuestionAssignment) => {
+  let cursor = 0;
+  const allQuestionTargets = buildAssignmentQuestionTargetList(assignment);
+  const parts = STRUCTURE_LEVELS
+    .map(({ key, label }) => {
+      const count = assignment.levels[key];
+      if (count <= 0) return '';
+
+      const questionTargets = allQuestionTargets.slice(cursor, cursor + count);
+      cursor += count;
+      return `${label}: ${questionTargets.join(', ')}`;
+    })
+    .filter(Boolean);
+
+  return parts.join('; ');
+};
+
 const buildSinglePassHtmlPrompt = (
   compactSpecsHtml: string,
   examTypeRequirements: string,
@@ -1545,7 +1641,7 @@ const buildSinglePassHtmlPrompt = (
     ? assignedLessonRequirements.map((lesson) => {
       const assignmentLines = lesson.assignments.map((assignment) => {
         const questionNumbers = assignment.numbers.map((number) => `Câu ${number}`).join(', ');
-        const levelDetails = buildLessonAssignmentDetails(assignment);
+        const levelDetails = buildLessonAssignmentDetailsV2(assignment);
         return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dùng đúng các số câu: ${questionNumbers}.${levelDetails ? ` Phân theo mức độ: ${levelDetails}.` : ''}`;
       }).join('\n');
 
@@ -1625,7 +1721,7 @@ const buildSinglePassHtmlPromptV2 = (
     ? assignedLessonRequirements.map((lesson) => {
       const assignmentLines = lesson.assignments.map((assignment) => {
         const questionNumbers = assignment.numbers.map((number) => `Cau ${number}`).join(', ');
-        const levelDetails = buildLessonAssignmentDetails(assignment);
+        const levelDetails = buildLessonAssignmentDetailsV2(assignment);
         return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dung dung cac so cau: ${questionNumbers}.${levelDetails ? ` Phan theo muc do: ${levelDetails}.` : ''}`;
       }).join('\n');
 
@@ -1736,7 +1832,7 @@ const buildSinglePassStructuredPromptV2 = (
     ? assignedLessonRequirements.map((lesson) => {
       const assignmentLines = lesson.assignments.map((assignment) => {
         const questionNumbers = assignment.numbers.map((number) => `Cau ${number}`).join(', ');
-        const levelDetails = buildLessonAssignmentDetails(assignment);
+        const levelDetails = buildLessonAssignmentDetailsV2(assignment);
         return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdown(assignment.levels)}. Dung dung cac so cau: ${questionNumbers}.${levelDetails ? ` Phan theo muc do: ${levelDetails}.` : ''}`;
       }).join('\n');
 
@@ -1758,6 +1854,104 @@ ${examTypeRequirements}
 
 PHAN BO THEO TUNG BAI:
 ${lessonAssignmentText}
+
+BAT BUOC:
+- Chi tra ve 1 JSON object hop le, khong markdown, khong giai thich.
+- JSON phai co dung 4 khoa: "multipleChoiceQuestions", "trueFalseQuestions", "shortAnswerQuestions", "essayQuestions".
+- Tong so phan tu cua 4 mang cong lai phai dung ${effectiveQuestionCount}.
+- So thu tu phai day du va lien tuc: ${questionChecklist}.
+- Neu bai nao duoc giao cau nao thi phai tao dung cau do cho dung bai do.
+- Khong duoc doi loai cau giua cac dai so cau.
+- Moi cau phai la cau that, co noi dung day du, khong placeholder, khong "...".
+- Khong duoc bo sot cau trac nghiem 1 dap an.
+- Khong duoc bo sot cau tra loi ngan/dien khuyet.
+- Cau trac nghiem 1 dap an phai co du 4 lua chon A, B, C, D.
+- Cau dung/sai phai co du 4 menh de a, b, c, d va 4 dap an tuong ung.
+- Cau tra loi ngan bat buoc la dang dien khuyet, trong prompt phai co cho trong nhu ".........." hoac "_____"; answer ngan chinh xac la phan dien vao cho trong.
+- Cau tu luan phai co answerGuide hoac rubric.
+- Moi chuoi phai bang tieng Viet va khong duoc rong.
+
+Schema bat buoc:
+{
+  "multipleChoiceQuestions": [
+    {
+      "number": 1,
+      "prompt": "Noi dung cau hoi",
+      "options": ["Phuong an A", "Phuong an B", "Phuong an C", "Phuong an D"],
+      "answerText": "A"
+    }
+  ],
+  "trueFalseQuestions": [
+    {
+      "number": 8,
+      "prompt": "De dan",
+      "statements": ["Menh de a", "Menh de b", "Menh de c", "Menh de d"],
+      "answerTokens": ["D", "S", "D", "S"]
+    }
+  ],
+  "shortAnswerQuestions": [
+    {
+      "number": 9,
+      "prompt": "Gia tri cua bieu thuc A + B la: ..........",
+      "answerText": "Dap an ngan"
+    }
+  ],
+  "essayQuestions": [
+    {
+      "number": 10,
+      "prompt": "Noi dung cau tu luan",
+      "answerGuide": "Goi y dap an",
+      "rubric": [
+        { "content": "Y 1", "points": 0.5 },
+        { "content": "Y 2", "points": 0.5 }
+      ]
+    }
+  ]
+}
+
+CHI TRA VE JSON OBJECT DUY NHAT.`;
+};
+
+const buildSinglePassStructuredPromptV3 = (
+  compactSpecsHtml: string,
+  examTypeRequirements: string,
+  assignedLessonRequirements: AssignedLessonRequirement[],
+  effectiveQuestionCount: number,
+  questionChecklist: string,
+  questionRangePrompt: string,
+) => {
+  const lessonAssignmentText = assignedLessonRequirements.length > 0
+    ? assignedLessonRequirements.map((lesson) => {
+      const assignmentLines = lesson.assignments.map((assignment) => {
+        const questionTargets = buildAssignmentQuestionTargets(assignment);
+        const levelDetails = buildLessonAssignmentDetailsV2(assignment);
+        return `  - ${QUESTION_TYPE_PROMPT_LABELS[assignment.type]}: ${formatLessonLevelBreakdownForQuestionType(assignment.levels, assignment.type)}. Dung dung cac so cau: ${questionTargets}.${levelDetails ? ` Phan theo muc do: ${levelDetails}.` : ''}`;
+      }).join('\n');
+
+      return `- Chuong: ${lesson.chapterName}\n  Bai: ${lesson.lessonName}\n${assignmentLines}`;
+    }).join('\n')
+    : '- Khong tach duoc theo tung bai tu ma tran, hay bam dung cau truc tong the ben duoi.';
+
+  return `Ban la giao vien Viet Nam. Hay tao DUY NHAT 1 JSON object cho de thi.
+
+DU LIEU NGUON:
+${compactSpecsHtml}
+
+CAU TRUC TONG THE BAT BUOC:
+- Tong so cau hien thi tren de: ${effectiveQuestionCount}
+${questionRangePrompt}
+
+PHAN BO TUNG DANG:
+${examTypeRequirements}
+
+PHAN BO THEO TUNG BAI:
+${lessonAssignmentText}
+
+QUY TAC RIENG CHO DANG DUNG/SAI:
+- Trong ma tran/dac ta, Dung/Sai duoc tinh theo tung menh de.
+- Cu 4 menh de phai gop thanh 1 cau dung/sai tren de.
+- Moi cau dung/sai tren de phai co dung 4 menh de a, b, c, d va 4 dap an tuong ung.
+- Vi du: 4 menh de => 1 cau dung/sai; 8 menh de => 2 cau dung/sai.
 
 BAT BUOC:
 - Chi tra ve 1 JSON object hop le, khong markdown, khong giai thich.
@@ -1947,9 +2141,9 @@ const renderQuestionHtml = (question: GeneratedExamQuestion) => {
   if (question.type === 'multiple_choice') {
     return `
       <div class="question-block">
-        <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+        <p><span class="question-number">C&#226;u ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
         <div class="options">
-          ${question.options?.map((option, index) => `<div class="option-item">${String.fromCharCode(65 + index)}. ${escapeHtml(option)}</div>`).join('') || ''}
+          ${question.options?.map((option, index) => `<div class="option-item">${String.fromCharCode(65 + index)}. ${escapeHtml(stripLeadingOptionLabel(option))}</div>`).join('') || ''}
         </div>
       </div>
     `;
@@ -1958,9 +2152,9 @@ const renderQuestionHtml = (question: GeneratedExamQuestion) => {
   if (question.type === 'true_false') {
     return `
       <div class="question-block">
-        <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+        <p><span class="question-number">C&#226;u ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
         <div class="statements">
-          ${question.statements?.map((statement, index) => `<div class="statement-item">${String.fromCharCode(97 + index)}) ${escapeHtml(statement)}</div>`).join('') || ''}
+          ${question.statements?.map((statement, index) => `<div class="statement-item">${String.fromCharCode(97 + index)}) ${escapeHtml(stripLeadingStatementLabel(statement))}</div>`).join('') || ''}
         </div>
       </div>
     `;
@@ -1968,7 +2162,7 @@ const renderQuestionHtml = (question: GeneratedExamQuestion) => {
 
   return `
     <div class="question-block">
-      <p><span class="question-number">Câu ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
+      <p><span class="question-number">C&#226;u ${question.number}.</span> ${escapeHtml(question.prompt)}</p>
     </div>
   `;
 };
@@ -1977,7 +2171,7 @@ const renderExamQuestionHtml = (question: GeneratedExamQuestion) => {
   if (question.type === 'short_answer') {
     return `
       <div class="question-block">
-        <p><span class="question-number">CÃ¢u ${question.number}.</span> ${escapeHtml(ensureShortAnswerPromptHasBlank(question.prompt))}</p>
+        <p><span class="question-number">C&#226;u ${question.number}.</span> ${escapeHtml(ensureShortAnswerPromptHasBlank(question.prompt))}</p>
       </div>
     `;
   }
@@ -2119,6 +2313,16 @@ const describeRowConfig = (row: ExamStructureRow) =>
   STRUCTURE_LEVELS.map(
     ({ key, label }) => `${label} ${row[key].count} câu x ${formatScore(row[key].score)} điểm/câu`,
   ).join(', ');
+
+const describeRowConfigV2 = (row: ExamStructureRow) => {
+  const isTrueFalse = isTrueFalseStructureRow(row);
+  const unitLabel = isTrueFalse ? 'menh de' : 'cau';
+  const scoreUnitLabel = isTrueFalse ? 'diem/menh de' : 'diem/cau';
+
+  return STRUCTURE_LEVELS.map(
+    ({ key, label }) => `${label} ${row[key].count} ${unitLabel} x ${formatScore(row[key].score)} ${scoreUnitLabel}`,
+  ).join(', ');
+};
 
 const sanitizeGeneratedHtml = (html: string) =>
   html.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
@@ -2335,6 +2539,26 @@ const buildExamTypeRequirements = (rows: ExamStructureRow[]) => {
   }).join('\n');
 };
 
+const buildExamTypeRequirementsV2 = (rows: ExamStructureRow[]) => {
+  const ranges = buildExamQuestionRanges(rows);
+
+  return rows.map((row, index) => {
+    const range = ranges[index];
+    const totalUnits = calculateRowTotals(row).count;
+    const displayTotal = calculateDisplayedQuestionCountForRow(row, index);
+
+    if (displayTotal === 0) {
+      return `- ${row.label}: 0 cau, phai bo hoan toan dang nay khoi de.`;
+    }
+
+    if (index === TRUE_FALSE_ROW_INDEX) {
+      return `- ${row.label}: ${totalUnits} menh de = ${displayTotal} cau dung/sai, danh so tu Cau ${range.start} den Cau ${range.end}. Chi tiet muc do: ${describeRowConfigV2(row)}.`;
+    }
+
+    return `- ${row.label}: ${displayTotal} cau, danh so tu Cau ${range.start} den Cau ${range.end}. Chi tiet muc do: ${describeRowConfigV2(row)}.`;
+  }).join('\n');
+};
+
 const sumLessonCountsByQuestionType = (
   lessonRequirements: LessonMatrixRequirement[],
   questionType: GeneratedQuestionType,
@@ -2373,6 +2597,33 @@ const buildExamQuestionRangesFromLessonRequirements = (
   });
 };
 
+const buildExamQuestionRangesFromLessonRequirementsV2 = (
+  lessonRequirements: LessonMatrixRequirement[],
+) => {
+  let currentQuestion = 1;
+
+  return QUESTION_TYPE_SEQUENCE.map((questionType, index) => {
+    const levels = sumLessonCountsByQuestionType(lessonRequirements, questionType);
+    const totalUnits = sumLevelCountMap(levels);
+    const total = convertQuestionUnitCountToDisplayCount(questionType, totalUnits);
+    const label = DEFAULT_EXAM_STRUCTURE[index]?.label || QUESTION_TYPE_PROMPT_LABELS[questionType];
+
+    if (total <= 0) {
+      return { label, total: 0, start: 0, end: 0 };
+    }
+
+    const range = {
+      label,
+      total,
+      start: currentQuestion,
+      end: currentQuestion + total - 1,
+    };
+
+    currentQuestion += total;
+    return range;
+  });
+};
+
 const buildExamTypeRequirementsFromLessonRequirements = (
   lessonRequirements: LessonMatrixRequirement[],
   questionRanges: QuestionRange[],
@@ -2387,6 +2638,27 @@ const buildExamTypeRequirementsFromLessonRequirements = (
   }
 
   return `- ${label}: ${total} câu, đánh số từ Câu ${range.start} đến Câu ${range.end}. Chi tiết mức độ: ${formatLessonLevelBreakdown(levels)}.`;
+}).join('\n');
+
+const buildExamTypeRequirementsFromLessonRequirementsV2 = (
+  lessonRequirements: LessonMatrixRequirement[],
+  questionRanges: QuestionRange[],
+) => QUESTION_TYPE_SEQUENCE.map((questionType, index) => {
+  const levels = sumLessonCountsByQuestionType(lessonRequirements, questionType);
+  const totalUnits = sumLevelCountMap(levels);
+  const displayTotal = convertQuestionUnitCountToDisplayCount(questionType, totalUnits);
+  const label = DEFAULT_EXAM_STRUCTURE[index]?.label || QUESTION_TYPE_PROMPT_LABELS[questionType];
+  const range = questionRanges[index];
+
+  if (!range || displayTotal <= 0) {
+    return `- ${label}: 0 cau, phai bo hoan toan dang nay khoi de.`;
+  }
+
+  if (questionType === 'true_false') {
+    return `- ${label}: ${totalUnits} menh de = ${displayTotal} cau dung/sai, danh so tu Cau ${range.start} den Cau ${range.end}. Chi tiet muc do: ${formatLessonLevelBreakdownForQuestionType(levels, questionType)}.`;
+  }
+
+  return `- ${label}: ${displayTotal} cau, danh so tu Cau ${range.start} den Cau ${range.end}. Chi tiet muc do: ${formatLessonLevelBreakdownForQuestionType(levels, questionType)}.`;
 }).join('\n');
 
 const buildQuestionChecklist = (totalQuestions: number) =>
@@ -2635,6 +2907,204 @@ const buildLessonBreakdownFromMatrix = (
     .join('\n');
 };
 
+const assignQuestionNumbersToLessonRequirementsV2 = (
+  lessonRequirements: LessonMatrixRequirement[],
+  questionRanges: QuestionRange[],
+): AssignedLessonRequirement[] => {
+  const assignedLessons = lessonRequirements.map((lesson) => ({
+    chapterName: lesson.chapterName,
+    lessonName: lesson.lessonName,
+    assignments: [] as LessonQuestionAssignment[],
+    totalQuestions: 0,
+  }));
+
+  QUESTION_TYPE_SEQUENCE.forEach((questionType, typeIndex) => {
+    const range = questionRanges[typeIndex];
+    if (!range || range.total <= 0) return;
+
+    if (questionType !== 'true_false') {
+      let currentQuestion = range.start;
+
+      assignedLessons.forEach((assignedLesson, lessonIndex) => {
+        const levels = lessonRequirements[lessonIndex]?.countsByType[questionType] || createEmptyLevelCountMap();
+        const total = sumLevelCountMap(levels);
+        if (total <= 0) return;
+
+        const numbers = Array.from({ length: total }, (_, index) => currentQuestion + index);
+        assignedLesson.assignments.push({
+          type: questionType,
+          start: currentQuestion,
+          end: currentQuestion + total - 1,
+          numbers,
+          total,
+          levels: { ...levels },
+        });
+        assignedLesson.totalQuestions += total;
+        currentQuestion += total;
+      });
+      return;
+    }
+
+    let currentQuestion = range.start;
+    let statementOffset = 0;
+
+    assignedLessons.forEach((assignedLesson, lessonIndex) => {
+      const levels = lessonRequirements[lessonIndex]?.countsByType[questionType] || createEmptyLevelCountMap();
+      const totalStatements = sumLevelCountMap(levels);
+      if (totalStatements <= 0) return;
+
+      const numbers = Array.from({ length: totalStatements }, () => {
+        const questionNumber = currentQuestion;
+        statementOffset += 1;
+        if (statementOffset >= TRUE_FALSE_STATEMENTS_PER_QUESTION) {
+          currentQuestion += 1;
+          statementOffset = 0;
+        }
+        return questionNumber;
+      });
+
+      assignedLesson.assignments.push({
+        type: questionType,
+        start: numbers[0] || currentQuestion,
+        end: numbers[numbers.length - 1] || currentQuestion,
+        numbers,
+        total: totalStatements,
+        levels: { ...levels },
+      });
+      assignedLesson.totalQuestions += new Set(numbers).size;
+    });
+  });
+
+  return assignedLessons.filter((lesson) => lesson.totalQuestions > 0);
+};
+
+const buildLessonBreakdownFromMatrixV2 = (
+  matrixHtml: string,
+  selectedLessonItems: SelectedLessonSummary[],
+  includeEssay: boolean,
+) => {
+  return extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, includeEssay)
+    .map((lesson) => {
+      const summaryParts = QUESTION_TYPE_SEQUENCE
+        .filter((questionType, index) => includeEssay || index < 3)
+        .map((questionType, index) => {
+          const unitLabel = getQuestionTypeUnitLabelV2(questionType);
+          const levelParts = EXAM_PROMPT_LEVEL_LABELS.map((levelLabel, levelIndex) => {
+            const count = lesson.countsByType[questionType][STRUCTURE_LEVELS[levelIndex].key];
+            return count > 0 ? `${count} ${unitLabel} ${levelLabel}` : '';
+          }).filter(Boolean);
+
+          if (levelParts.length === 0) return '';
+          const groupedNote = questionType === 'true_false'
+            ? ' (4 menh de = 1 cau dung/sai)'
+            : '';
+          return `${EXAM_PROMPT_TYPE_LABELS[index]}${groupedNote}: ${levelParts.join(', ')}`;
+        })
+        .filter(Boolean);
+
+      return summaryParts.length > 0 ? `- ${lesson.lessonName}: ${summaryParts.join('; ')}.` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const buildMatrixPromptV2 = (
+  subject: string,
+  grade: string,
+  examType: string,
+  duration: number,
+  totalPeriods: number,
+  totalMatrixUnits: number,
+  totalDisplayedQuestions: number,
+  totalPoints: number,
+  questionConfig: ExamStructureRow[],
+  hasEssay: boolean,
+  selectedTopics: any[],
+) => `Hay tao **MA TRAN DE KIEM TRA** (HTML Table) cho mon **${subject}**, khoi **${grade}**.
+
+**CAU HINH DE THI:**
+- Loai de: ${examType}
+- Thoi gian: ${duration} phut
+- Tong so tiet trong tam: ${totalPeriods} tiet
+- Tong so don vi trong ma tran: ${totalMatrixUnits}
+- So cau hien thi tren de sau khi quy doi: ${totalDisplayedQuestions}
+- Tong diem theo cau hinh: ${formatScore(totalPoints)}
+
+**CAU TRUC CAU HOI VA DIEM/DON VI (bat buoc tuan thu):**
+- 1 lua chon (Dang I): ${describeRowConfigV2(questionConfig[0])}
+- Dung - Sai (Dang II): ${describeRowConfigV2(questionConfig[1])}
+- Tra loi ngan (Dang III): ${describeRowConfigV2(questionConfig[2])}
+- Tu luan: ${describeRowConfigV2(questionConfig[3])}
+
+**QUY TAC RIENG CHO DANG II (bat buoc):**
+- Trong ma tran, Dang II duoc tinh theo tung MENH DE, khong tinh theo cau gop.
+- Cu 4 menh de = 1 cau dung/sai tren de thuc te.
+- Moi menh de Dung/Sai co the duoc cham 0.25 diem.
+- Vi du: 4 menh de => 1 cau dung/sai; 8 menh de => 2 cau dung/sai.
+- Footer "Tong so cau" va cac cot Dang II phai hien thi theo so MENH DE dung/sai, giong logic ma tran.
+
+**DINH DANG BANG BAT BUOC:**
+- Header 4 dong merge cells.
+- Dong 1: TT(rowspan=4) | Chuong/chu de(rowspan=4) | Noi dung/DVKT(rowspan=4) | Muc do danh gia(colspan=...) | Tong so cau(colspan=4,rowspan=2) | Ti le % diem(rowspan=4)
+- Dong 2: TNKQ(colspan=...)
+- Dong 3: 1 lua chon(colspan=4) | Dung-Sai(colspan=4) | Tra loi ngan(colspan=4) ${hasEssay ? '| Tu luan(colspan=4)' : ''} | Biet | Hieu | VD | VDC
+- Dong 4: Biet | Hieu | VD | VDC | Biet | Hieu | VD | VDC | Biet | Hieu | VD | VDC ${hasEssay ? '| Biet | Hieu | VD | VDC' : ''}
+- Moi bai hoc co 2 dong: dong 1 la so luong; dong 2 la ma nang luc TD/GQVD/GQVD cao.
+- Neu o nao = 0 thi de trong.
+
+**FOOTER 3 DONG:**
+1. Tong so cau theo tung cot + tong cuoi
+2. Tong so diem theo tung cot + tong = 10
+3. Ti le % diem: cuoi = 100%
+
+**QUY TAC DIEM:**
+- Moi diem phai la boi so cua 0.25
+- Tong diem = 10
+- Phan bo cau hoi theo ty le so tiet
+- Phai dung dung so luong va diem/don vi theo cau hinh da nhap, khong tu chia lai diem
+- Rieng Dang II: diem tinh theo tung menh de, khong tinh 1 cau gop = 1 don vi trong ma tran
+
+**DU LIEU DAU VAO:**
+${JSON.stringify(selectedTopics, null, 2)}
+
+**YEU CAU OUTPUT:**
+1. Xuat full HTML document (<!DOCTYPE html>...)
+2. Co <style> voi Times New Roman, bang co border day du
+3. Chi tra ve HTML thuan, khong markdown code block.`;
+
+const buildSpecsPromptV2 = (
+  compactMatrixHtml: string,
+  examType: string,
+  subject: string,
+) => `Dua tren Ma tran de kiem tra sau, hay tao BANG DAC TA DE KIEM TRA (Full HTML Document).
+
+MA TRAN DAU VAO:
+${compactMatrixHtml}
+
+YEU CAU:
+1. Tieu de bang: "DAC TA DE KIEM TRA ${examType.toUpperCase()} - ${subject.toUpperCase()}"
+2. Duoi tieu de: "NAM HOC 20... - 20..."
+3. Cau truc cot phai khop voi ma tran va them cot "Yeu cau can dat"
+4. Moi bai hoc co 2 dong: dong 1 so luong, dong 2 ma nang luc
+5. Footer 3 dong: Tong so cau, Tong so diem (=10), Ti le %
+6. Cot "Yeu cau can dat" ghi ro Nhan biet, Thong hieu, Van dung, Van dung cao
+7. QUAN TRONG - Dang II (Dung/Sai):
+- Trong ma tran/dac ta, Dang II tinh theo tung menh de.
+- Moi menh de Dung/Sai = 1 don vi = 0.25 diem.
+- Cu 4 menh de gop thanh 1 cau Dung/Sai tren de thi, gom a, b, c, d.
+- Vi du: 4 menh de => 1 cau dung/sai; 8 menh de => 2 cau dung/sai.
+
+Style CSS:
+body { font-family: "Times New Roman", serif; font-size: 13pt; margin: 20px; }
+h2 { text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+th, td { border: 1px solid black; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { font-weight: bold; }
+.left-align, .text-left { text-align: left; padding: 6px 8px; vertical-align: top; }
+.bold { font-weight: bold; }
+
+Chi tra ve HTML thuan, khong co markdown code block.`;
+
 const renderStructureLabel = (label: string) => {
   const match = label.match(/^(.*?)(\s*\(.+\))$/);
 
@@ -2696,7 +3166,9 @@ export default function App() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
+  const totalConfiguredDisplayedQuestions = calculateTotalDisplayedQuestions(examStructure);
   const totalConfiguredPoints = calculateTotalPoints(examStructure);
+  const trueFalseStatementCount = calculateRowTotals(examStructure[TRUE_FALSE_ROW_INDEX] || DEFAULT_EXAM_STRUCTURE[TRUE_FALSE_ROW_INDEX]).count;
   const matrixPreviewImageUrl = useMemo(
     () => (matrixHtml ? buildSafePreviewImageUrl(matrixHtml, 'Ma trận đề thi') : ''),
     [matrixHtml],
@@ -2932,6 +3404,17 @@ export default function App() {
       });
       return;
     }
+    if (trueFalseStatementCount % TRUE_FALSE_STATEMENTS_PER_QUESTION !== 0) {
+      Swal.fire({
+        title: 'Dạng II chưa hợp lệ',
+        text: `Tổng số mệnh đề Đúng/Sai hiện tại là ${trueFalseStatementCount}. Vui lòng nhập bội số của ${TRUE_FALSE_STATEMENTS_PER_QUESTION} để cứ ${TRUE_FALSE_STATEMENTS_PER_QUESTION} mệnh đề gộp thành 1 câu Đúng/Sai.`,
+        icon: 'warning',
+        confirmButtonColor: '#2dd4a8',
+        background: '#132a1f',
+        color: '#e2e8f0',
+      });
+      return;
+    }
     setIsGenerating(true);
     await waitForNextPaint();
     try {
@@ -2957,6 +3440,20 @@ export default function App() {
         qc[3].vandung.count +
         qc[3].vandungcao.count
       ) > 0;
+
+      const matrixPrompt = buildMatrixPromptV2(
+        monHoc,
+        khoiLop,
+        loaiKiemTra,
+        thoiGian,
+        totalPeriods,
+        totalConfiguredQuestions,
+        totalConfiguredDisplayedQuestions,
+        totalConfiguredPoints,
+        qc,
+        hasEssay,
+        selectedTopics,
+      );
 
       const prompt = `Hãy tạo **MA TRẬN ĐỀ KIỂM TRA** (HTML Table) cho môn **${monHoc}**, khối **${khoiLop}**.
 
@@ -3017,7 +3514,7 @@ th { font-weight: bold; }
 .bold { font-weight: bold; }
 3. CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
-      const result = await callGeminiAI(prompt, apiKey, model);
+      const result = await callGeminiAI(matrixPrompt, apiKey, model);
       const cleanHtml = extractHtmlDocumentFromResponse(result);
       setMatrixHtml(cleanHtml);
       setCurrentStep(2);
@@ -3160,6 +3657,7 @@ th { font-weight: bold; }
     await waitForNextPaint();
     try {
       const compactMatrixHtml = compactHtmlForPrompt(matrixHtml);
+      const specsPrompt = buildSpecsPromptV2(compactMatrixHtml, loaiKiemTra, monHoc);
       const prompt = `Dựa trên Ma trận đề kiểm tra sau, hãy tạo BẢNG ĐẶC TẢ ĐỀ KIỂM TRA (Full HTML Document).
 
 MA TRẬN ĐẦU VÀO (đã rút gọn):
@@ -3185,7 +3683,7 @@ th { font-weight: bold; }
 
 CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
 
-      const result = await callGeminiAI(prompt, apiKey, model);
+      const result = await callGeminiAI(specsPrompt, apiKey, model);
       const cleanHtml = extractHtmlDocumentFromResponse(result);
       setSpecsHtml(cleanHtml);
       setCurrentStep(3);
@@ -3209,7 +3707,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
     setIsGenerating(true);
     await waitForNextPaint();
     try {
-      const configuredQuestionCount = totalConfiguredQuestions;
+      const configuredQuestionCount = totalConfiguredDisplayedQuestions;
       const fallbackQuestionCount = Math.max(
         extractExpectedQuestionCountFromHtml(specsHtml),
         extractExpectedQuestionCountFromHtml(matrixHtml),
@@ -3232,31 +3730,42 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         ? calculateRowTotals(examStructure[3]).count > 0
         : /tu luan|tự luận/i.test(htmlToPlainText(specsHtml));
       let examTypeRequirements = configuredQuestionCount > 0
-        ? buildExamTypeRequirements(examStructure)
+        ? buildExamTypeRequirementsV2(examStructure)
         : '- Follow the exact question distribution that already appears in the uploaded specification table.';
+      const resolvedIncludeEssay = /tu luan|tá»± luáº­n/i.test(htmlToPlainText(matrixHtml || specsHtml));
       let questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
-      const lessonBreakdownPrompt = buildLessonBreakdownFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
-      const lessonRequirements = extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, includeEssay);
-      if (configuredQuestionCount <= 0) {
-        const derivedQuestionRanges = buildExamQuestionRangesFromLessonRequirements(lessonRequirements);
-        const derivedQuestionCount = derivedQuestionRanges.reduce((sum, item) => sum + item.total, 0);
+      const lessonBreakdownPrompt = buildLessonBreakdownFromMatrixV2(matrixHtml, selectedLessonItems, resolvedIncludeEssay);
+      const lessonRequirements = extractLessonRequirementsFromMatrix(matrixHtml, selectedLessonItems, resolvedIncludeEssay);
+      const matrixTrueFalseStatementCount = sumLevelCountMap(sumLessonCountsByQuestionType(lessonRequirements, 'true_false'));
+      const hasTrueFalseStatements = matrixTrueFalseStatementCount > 0 || trueFalseStatementCount > 0;
+      const effectiveTrueFalseStatementCount = matrixTrueFalseStatementCount > 0
+        ? matrixTrueFalseStatementCount
+        : trueFalseStatementCount;
 
-        if (derivedQuestionCount > 0) {
-          examQuestionRanges = derivedQuestionRanges;
-          activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
-          effectiveQuestionCount = derivedQuestionCount;
-          examTypeRequirements = buildExamTypeRequirementsFromLessonRequirements(lessonRequirements, examQuestionRanges);
-          questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
-        }
+      if (
+        effectiveTrueFalseStatementCount > 0
+        && effectiveTrueFalseStatementCount % TRUE_FALSE_STATEMENTS_PER_QUESTION !== 0
+      ) {
+        throw new Error(`So menh de Dung/Sai hien tai la ${effectiveTrueFalseStatementCount}, khong chia het cho ${TRUE_FALSE_STATEMENTS_PER_QUESTION}. Vui long chinh lai ma tran/cau hinh de cu ${TRUE_FALSE_STATEMENTS_PER_QUESTION} menh de tao thanh 1 cau dung/sai.`);
       }
-      const assignedLessonRequirements = assignQuestionNumbersToLessonRequirements(lessonRequirements, examQuestionRanges);
+      const derivedQuestionRanges = buildExamQuestionRangesFromLessonRequirementsV2(lessonRequirements);
+      const derivedQuestionCount = derivedQuestionRanges.reduce((sum, item) => sum + item.total, 0);
+
+      if (derivedQuestionCount > 0) {
+        examQuestionRanges = derivedQuestionRanges;
+        activeQuestionTypes = examQuestionRanges.filter((item) => item.total > 0);
+        effectiveQuestionCount = derivedQuestionCount;
+        examTypeRequirements = buildExamTypeRequirementsFromLessonRequirementsV2(lessonRequirements, examQuestionRanges);
+        questionChecklist = buildQuestionChecklist(effectiveQuestionCount);
+      }
+      const assignedLessonRequirements = assignQuestionNumbersToLessonRequirementsV2(lessonRequirements, examQuestionRanges);
       const questionRangePrompt = activeQuestionTypes.length > 0
         ? activeQuestionTypes.map((item) => `- ${item.label}: ${item.total} câu, đánh số từ Câu ${item.start} đến Câu ${item.end}`).join('\n')
         : '- Use the uploaded specification table as the source of truth for question counts and numbering.';
 
       const shouldUseSingleCallPrompt = true;
       if (shouldUseSingleCallPrompt) {
-        const singlePassPrompt = buildSinglePassStructuredPromptV2(
+        const singlePassPrompt = buildSinglePassStructuredPromptV3(
           compactSpecsHtml,
           examTypeRequirements,
           assignedLessonRequirements,
@@ -3294,7 +3803,7 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
         return;
       }
 
-      if (assignedLessonRequirements.length > 0) {
+      if (assignedLessonRequirements.length > 0 && !hasTrueFalseStatements) {
         const lessonQuestions: GeneratedExamQuestion[] = [];
         let lessonPipelineFailed = false;
         let lessonPipelineFeedback = '';
@@ -3996,7 +4505,7 @@ LẦN THỬ ${attempt}:
                     <label className="block text-sm font-semibold text-primary mb-2.5">{label}</label>
                     <div className="grid grid-cols-[minmax(3rem,0.84fr)_minmax(3.8rem,1.16fr)] gap-1.5">
                       <div className="min-w-0">
-                        <span className="metric-caption">Số câu</span>
+                        <span className="metric-caption">{`Số ${getStructureCountUnitLabelV2(row)}`}</span>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -4007,7 +4516,7 @@ LẦN THỬ ${attempt}:
                         />
                       </div>
                       <div className="min-w-0">
-                        <span className="metric-caption">Điểm/câu</span>
+                        <span className="metric-caption">{isTrueFalseStructureRow(row) ? 'Điểm/mệnh đề' : 'Điểm/câu'}</span>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -4026,7 +4535,7 @@ LẦN THỬ ${attempt}:
                   <label className="block text-sm font-semibold text-primary mb-2.5">Tổng</label>
                   <div className="grid grid-cols-[minmax(3rem,0.84fr)_minmax(3.8rem,1.16fr)] gap-1.5">
                     <div className="min-w-0">
-                      <span className="metric-caption">Tổng câu</span>
+                      <span className="metric-caption">{`Tổng ${getStructureCountUnitLabelV2(row)}`}</span>
                       <div className="input-field metric-box metric-box-count number-cell min-h-12 bg-surface-light/70 text-primary overflow-hidden whitespace-nowrap">
                         {rowTotals.count}
                       </div>
@@ -4046,12 +4555,22 @@ LẦN THỬ ${attempt}:
 
         <div className="mt-5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 px-4 py-3 rounded-xl border border-border bg-surface-light/40 text-sm">
           <span className="text-slate-300">
-            Tổng câu: <strong className="text-primary">{totalConfiguredQuestions}</strong>
+            {trueFalseStatementCount > 0 ? 'Tổng câu/mệnh đề: ' : 'Tổng câu: '}
+            <strong className="text-primary">{totalConfiguredQuestions}</strong>
           </span>
+          {trueFalseStatementCount > 0 && (
+            <span className="text-slate-300">
+              Số câu hiển thị trên đề: <strong className="text-primary">{totalConfiguredDisplayedQuestions}</strong>
+            </span>
+          )}
           <span className={Math.abs(totalConfiguredPoints - 10) < 1e-9 ? 'text-slate-300' : 'text-amber-300'}>
             Tổng điểm: <strong className="text-primary">{formatScore(totalConfiguredPoints)}/10</strong>
           </span>
-          <span className="text-slate-500 text-xs">Điểm/câu nên nhập theo bước 0.25.</span>
+          <span className="text-slate-500 text-xs">
+            {trueFalseStatementCount > 0
+              ? `Dạng II nhập theo số mệnh đề; cứ ${TRUE_FALSE_STATEMENTS_PER_QUESTION} mệnh đề = 1 câu đúng/sai trên đề.`
+              : 'Điểm/câu nên nhập theo bước 0.25.'}
+          </span>
         </div>
       </div>
 
