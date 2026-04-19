@@ -18,10 +18,14 @@ import {
   FileText,
   Eye,
   ArrowLeft,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Swal from 'sweetalert2';
 import { callGeminiAI, parsePPCTFile, toUserFacingGeminiErrorMessage } from './services/gemini';
+import { checkAuthQuota, incrementQuota } from './services/auth';
+import AuthModal from './AuthModal';
 
 // ─── Constants ──────────────────────────────────────────────────────
 const STEPS = [
@@ -3164,6 +3168,7 @@ export default function CV7991App({ onGoHome }: { onGoHome?: () => void }) {
   const [matrixHtml, setMatrixHtml] = useState('');
   const [specsHtml, setSpecsHtml] = useState('');
   const [examHtml, setExamHtml] = useState('');
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const totalConfiguredQuestions = calculateTotalQuestions(examStructure);
@@ -3343,6 +3348,61 @@ export default function CV7991App({ onGoHome }: { onGoHome?: () => void }) {
       next.has(chapterId) ? next.delete(chapterId) : next.add(chapterId);
       return next;
     });
+  };
+
+  // ─── Manual Lesson Entry ──────────────────────────────────────────
+  const manualChapterId = '__manual__';
+
+  const ensureManualChapter = (currentChapters: Chapter[]): Chapter[] => {
+    const existing = currentChapters.find(c => c.id === manualChapterId);
+    if (existing) return currentChapters;
+    return [
+      ...currentChapters,
+      { id: manualChapterId, name: 'Danh sách bài học', totalPeriods: 0, lessons: [] },
+    ];
+  };
+
+  const addManualLesson = () => {
+    const newId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    setChapters(prev => {
+      const updated = ensureManualChapter(prev).map(ch => {
+        if (ch.id !== manualChapterId) return ch;
+        const newLesson: Lesson = { id: newId, name: '', periods: 1 };
+        const lessons = [...ch.lessons, newLesson];
+        return { ...ch, lessons, totalPeriods: lessons.reduce((s, l) => s + l.periods, 0) };
+      });
+      return updated;
+    });
+    // Auto-select and expand
+    setSelectedLessons(prev => new Set([...prev, newId]));
+    setExpandedChapters(prev => new Set([...prev, manualChapterId]));
+  };
+
+  const removeManualLesson = (lessonId: string) => {
+    setChapters(prev =>
+      prev.map(ch => {
+        if (ch.id !== manualChapterId) return ch;
+        const lessons = ch.lessons.filter(l => l.id !== lessonId);
+        return { ...ch, lessons, totalPeriods: lessons.reduce((s, l) => s + l.periods, 0) };
+      }).filter(ch => ch.id !== manualChapterId || ch.lessons.length > 0)
+    );
+    setSelectedLessons(prev => {
+      const next = new Set(prev);
+      next.delete(lessonId);
+      return next;
+    });
+  };
+
+  const updateManualLesson = (lessonId: string, field: 'name' | 'periods', value: string | number) => {
+    setChapters(prev =>
+      prev.map(ch => {
+        if (ch.id !== manualChapterId) return ch;
+        const lessons = ch.lessons.map(l =>
+          l.id === lessonId ? { ...l, [field]: field === 'periods' ? Math.max(1, Number(value) || 1) : value } : l
+        );
+        return { ...ch, lessons, totalPeriods: lessons.reduce((s, l) => s + l.periods, 0) };
+      })
+    );
   };
 
   const handleGenerateMatrix = async () => {
@@ -3703,6 +3763,10 @@ CHỈ trả về HTML thuần, KHÔNG có markdown code block.`;
   };
 
   const handleGenerateExam = async () => {
+    if (!checkAuthQuota()) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!specsHtml) return;
     setExamHtml('');
     setIsGenerating(true);
@@ -4159,7 +4223,7 @@ If a lesson is not listed above, do not create any question from that lesson.
 ${lessonBreakdownPrompt ? `PHÃ‚N Bá»” CHI TIáº¾T THEO Tá»ªNG BÃ€I (pháº£i bÃ¡m sÃ¡t tá»«ng dÃ²ng):
 ${lessonBreakdownPrompt}
 
-Náº¿u má»™t bÃ i khÃ´ng xuáº¥t hiá»‡n trong danh sÃ¡ch trÃªn thÃ¬ KHÃ”NG Ä‘Æ°á»£c táº¡o cÃ¢u há»i tá»« bÃ i Ä‘Ã³.
+Náº¿u má»™t bÃ i khÃ´ng xuáº¥t hiá»‡n trong danh sÃ¡ch trÃªn thÃ¬ KHÃ”NG Ä‘Æ°á»£c táº¡o cÃ¢u há» i tá»« bÃ i Ä‘Ã³.
 ` : ''}
 
 QUY TẮC BẮT BUỘC:
@@ -4183,7 +4247,7 @@ YÊU CẦU OUTPUT:
 5. Trường: "TRƯỜNG THPT ..............." (để trống)
 6. Có phần Họ tên, SBD
 7. Nội dung câu hỏi phải phù hợp với bảng đặc tả
-8. Đáp án ở cuối PHẢI trình bày dạng BẢNG, mỗi bảng 10 câu, gồm 2 dòng:
+8. Đáp án ở cuối PHẦN trình bày dạng BẢNG, mỗi bảng 10 câu, gồm 2 dòng:
    - Dòng 1: "Câu" | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
    - Dòng 2: "Đáp án" | A | B | C | D | ... (đáp án tương ứng)
    - Bảng tiếp theo: Câu 11-20, 21-30, 31-40... cho đến hết
@@ -4252,6 +4316,7 @@ LẦN THỬ ${attempt}:
 
         if (questionContentValidation.isComplete && answerKeyValidation.isComplete) {
           setExamHtml(cleanHtml);
+          incrementQuota();
           setCurrentStep(4);
           return;
         }
@@ -4348,51 +4413,109 @@ LẦN THỬ ${attempt}:
           </div>
         </div>
 
-        {/* Upload PPCT */}
-        <div className="mt-6">
-          <input
-            type="file"
-            id="ppct-upload"
-            accept=".pdf,.docx"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                setPpctFile(file);
-                setChapters([]);
-                setSelectedLessons(new Set());
-                handleParsePPCT(file);
-              }
-            }}
-          />
-          {ppctFile ? (
-            <div className="flex items-center justify-between px-4 py-3 border border-primary/30 rounded-xl bg-primary/5">
-              <div className="flex items-center gap-2 min-w-0">
+        {/* Upload PPCT & Nhập thủ công */}
+        <div className="mt-6 pt-5 border-t border-border">
+          <div className="flex items-center justify-between mb-4">
+            <label className="block text-sm font-medium text-primary">Danh sách bài học</label>
+            <div className="relative">
+              <input
+                type="file"
+                id="ppct-upload"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setPpctFile(file);
+                    setChapters([]);
+                    setSelectedLessons(new Set());
+                    handleParsePPCT(file);
+                  }
+                }}
+              />
+              <label htmlFor="ppct-upload" className="flex items-center gap-2 px-4 py-2 bg-surface-light hover:bg-surface border border-border rounded-lg text-sm text-slate-300 font-medium cursor-pointer transition-colors">
+                <Upload size={16} />
+                Upload File PPCT (.pdf, .docx)
+              </label>
+            </div>
+          </div>
+
+          {/* Danh sách bài thủ công */}
+          <div className="space-y-3">
+            {chapters.find(c => c.id === manualChapterId)?.lessons.map((lesson) => (
+              <div key={lesson.id} className="flex flex-col sm:flex-row items-center gap-3 bg-surface-light/30 p-2 rounded-xl border border-border">
+                <input
+                  type="text"
+                  className="input-field flex-1 !bg-surface-light border-transparent focus:border-primary/50"
+                  placeholder="Nhập tên bài học..."
+                  value={lesson.name}
+                  onChange={(e) => updateManualLesson(lesson.id, 'name', e.target.value)}
+                />
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 flex-1 sm:w-32">
+                    <span className="text-sm text-slate-400 shrink-0">Số tiết:</span>
+                    <input
+                      type="number"
+                      className="input-field !bg-surface-light border-transparent focus:border-primary/50 px-2 py-1.5 h-[42px] text-center"
+                      value={lesson.periods}
+                      onChange={(e) => updateManualLesson(lesson.id, 'periods', e.target.value)}
+                      min={1}
+                    />
+                  </div>
+                  <button
+                    onClick={() => removeManualLesson(lesson.id)}
+                    className="p-2.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-colors shrink-0"
+                    title="Xóa bài học"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={addManualLesson}
+              className="w-full py-3 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 text-slate-400 hover:text-primary transition-colors flex items-center justify-center gap-2 font-medium"
+            >
+              <Plus size={18} />
+              Thêm bài học
+            </button>
+          </div>
+
+          {/* File đã upload */}
+          {ppctFile && chapters.find(c => c.id !== manualChapterId) && (
+            <div className="mt-4 flex items-center justify-between px-4 py-3 border border-primary/30 rounded-xl bg-primary/5">
+              <div className="flex items-center gap-3 min-w-0">
                 {isParsing ? (
                   <Loader2 size={16} className="text-primary animate-spin shrink-0" />
                 ) : (
                   <Check size={16} className="text-primary shrink-0" />
                 )}
-                <span className="text-sm text-primary truncate">{ppctFile.name}</span>
-                {isParsing && <span className="text-xs text-slate-400 shrink-0">Đang phân tích...</span>}
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm text-primary font-medium truncate">{ppctFile.name}</span>
+                  <span className="text-xs text-slate-400 mt-0.5 truncate">
+                    Đã trích xuất {chapters.filter(c => c.id !== manualChapterId).length} chương/chủ đề
+                  </span>
+                </div>
               </div>
               <button
                 onClick={() => {
                   setPpctFile(null);
-                  setChapters([]);
-                  setSelectedLessons(new Set());
+                  setChapters(prev => prev.filter(c => c.id === manualChapterId));
+                  setSelectedLessons(prev => {
+                    const manualIds = new Set(chapters.find(c => c.id === manualChapterId)?.lessons.map(l => l.id) || []);
+                    const next = new Set<string>();
+                    prev.forEach(id => { if (manualIds.has(id)) next.add(id); });
+                    return next;
+                  });
                   (document.getElementById('ppct-upload') as HTMLInputElement).value = '';
                 }}
-                className="text-xs text-slate-400 hover:text-red-400 ml-3 shrink-0"
+                className="p-2 text-slate-400 hover:text-red-400 bg-surface-light rounded-lg ml-3 shrink-0"
+                title="Xóa file tải lên"
               >
-                Xóa
+                <Trash2 size={16} />
               </button>
             </div>
-          ) : (
-            <label htmlFor="ppct-upload" className="upload-btn cursor-pointer">
-              <Upload size={18} />
-              Upload File PPCT (.pdf, .docx)
-            </label>
           )}
         </div>
       </div>
@@ -4912,6 +5035,13 @@ LẦN THỬ ${attempt}:
             </div>
           </motion.div>
         </div>
+      )}
+
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => setShowAuthModal(false)}
+        />
       )}
     </div>
   );

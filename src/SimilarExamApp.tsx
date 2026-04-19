@@ -4,6 +4,8 @@ import { motion } from 'motion/react';
 import Swal from 'sweetalert2';
 import { generateSimilarExam } from './services/gemini';
 import type { ImageQuality, SolutionDetail } from './services/gemini';
+import { checkAuthQuota, incrementQuota } from './services/auth';
+import AuthModal from './AuthModal';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -39,6 +41,7 @@ export default function SimilarExamApp({ onGoHome }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [examHtml, setExamHtml] = useState('');
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [imageQuality, setImageQuality] = useState<ImageQuality>('premium');
   const [solutionDetail, setSolutionDetail] = useState<SolutionDetail>('standard');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +63,10 @@ export default function SimilarExamApp({ onGoHome }: Props) {
   }, []);
 
   const handleGenerate = async () => {
+    if (!checkAuthQuota()) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!file) {
       Swal.fire({
         title: 'Chưa có file',
@@ -86,6 +93,7 @@ export default function SimilarExamApp({ onGoHome }: Props) {
 
       const html = await generateSimilarExam(base64, finalMime, apiKey, model, { imageQuality, solutionDetail });
       setExamHtml(html);
+      incrementQuota();
 
       Swal.fire({
         title: 'Thành công!',
@@ -327,6 +335,13 @@ ${examHtml}
           </div>
         )}
       </main>
+
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => setShowAuthModal(false)}
+        />
+      )}
     </div>
   );
 }

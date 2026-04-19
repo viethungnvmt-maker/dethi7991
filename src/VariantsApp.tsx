@@ -3,6 +3,8 @@ import { Upload, ArrowLeft, Loader2, Download, Check, Layers, Play, X } from 'lu
 import { motion } from 'motion/react';
 import Swal from 'sweetalert2';
 import { generateExamVariants } from './services/gemini';
+import { checkAuthQuota, incrementQuota } from './services/auth';
+import AuthModal from './AuthModal';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -33,6 +35,7 @@ export default function VariantsApp({ onGoHome }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(['idle', 'idle', 'idle']);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +56,10 @@ export default function VariantsApp({ onGoHome }: Props) {
   }, []);
 
   const handleGenerate = async () => {
+    if (!checkAuthQuota()) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!file) {
       Swal.fire({
         title: 'Chưa có file',
@@ -92,6 +99,7 @@ export default function VariantsApp({ onGoHome }: Props) {
         setStepStatuses(['done', 'done', 'done']);
 
         setVariants(result.variants.slice(0, 3));
+        incrementQuota();
       } else {
         throw new Error('AI chưa sinh đủ 3 đề biến thể. Vui lòng thử lại.');
       }
@@ -342,6 +350,13 @@ ${variant.content}
           </div>
         )}
       </main>
+
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => setShowAuthModal(false)}
+        />
+      )}
     </div>
   );
 }

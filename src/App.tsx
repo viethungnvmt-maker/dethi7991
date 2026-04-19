@@ -28,16 +28,30 @@ export default function App() {
   const handleGoHome = () => setCurrentMode('home');
 
   return (
-    <>
-      {currentMode === 'home' && (
-        <Home 
-          onSelectMode={setCurrentMode} 
-          onOpenSettings={() => setShowApiKeyModal(true)} 
-        />
-      )}
-      {currentMode === 'cv7991' && <CV7991App onGoHome={handleGoHome} />}
-      {currentMode === 'similar' && <SimilarExamApp onGoHome={handleGoHome} />}
-      {currentMode === 'variants' && <VariantsApp onGoHome={handleGoHome} />}
+    <div className="flex flex-col min-h-screen bg-[#12141a]">
+      <div className="flex-1 w-full flex flex-col">
+        {currentMode === 'home' && (
+          <Home 
+            onSelectMode={setCurrentMode} 
+            onOpenSettings={() => setShowApiKeyModal(true)} 
+          />
+        )}
+        {currentMode === 'cv7991' && <CV7991App onGoHome={handleGoHome} />}
+        {currentMode === 'similar' && <SimilarExamApp onGoHome={handleGoHome} />}
+        {currentMode === 'variants' && <VariantsApp onGoHome={handleGoHome} />}
+      </div>
+
+      <footer className="w-full text-center py-6 border-t border-white/5 bg-[#0d1f17] mt-auto">
+        <p className="text-slate-400 text-sm mb-1">
+          Tạo Đề Thi Theo CV 7991 © 2026 | Powered by Google Gemini AI
+        </p>
+        <p className="text-slate-400 text-sm">
+          Mọi tool AI và khóa học tạo app dành cho giáo viên có tại:{' '}
+          <a href="https://thayhungedu.vercel.app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
+            thayhungedu.vercel.app
+          </a>
+        </p>
+      </footer>
 
       {/* Global API Key Modal */}
       {showApiKeyModal && (
