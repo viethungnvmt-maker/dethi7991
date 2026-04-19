@@ -321,24 +321,54 @@ th { font-weight: bold; }`;
   }
 }
 
+export type ImageQuality = 'standard' | 'high' | 'premium';
+export type SolutionDetail = 'brief' | 'standard' | 'deep';
+
+export interface SimilarExamOptions {
+  imageQuality?: ImageQuality;
+  solutionDetail?: SolutionDetail;
+}
+
+const IMAGE_QUALITY_PROMPTS: Record<ImageQuality, string> = {
+  standard: 'Mô tả hình vẽ ở mức cơ bản, đơn giản.',
+  high: 'Mô tả hình vẽ chi tiết, rõ ràng, có ghi chú đầy đủ kích thước và ký hiệu.',
+  premium: 'Mô tả hình vẽ cực kỳ chi tiết và chính xác. Ghi đầy đủ tọa độ, kích thước, ký hiệu, và các chú thích cần thiết. Nếu là hình học thì vẽ lại bằng SVG inline.',
+};
+
+const SOLUTION_DETAIL_PROMPTS: Record<SolutionDetail, string> = {
+  brief: 'Phần đáp án: CHỈ ghi đáp án cuối cùng (ví dụ: Câu 1: A, Câu 2: B...). Không cần lời giải.',
+  standard: 'Phần đáp án: Ghi đáp án KÈM lời giải chi tiết từng bước cho mỗi câu.',
+  deep: 'Phần đáp án: Ghi đáp án kèm lời giải chi tiết, giải thích tại sao đáp án đúng, tại sao các đáp án khác sai, và các mẹo/phương pháp giải nhanh.',
+};
+
 export async function generateSimilarExam(
   fileBase64: string,
   mimeType: string,
   apiKey: string,
-  modelName?: string
+  modelName?: string,
+  options: SimilarExamOptions = {}
 ): Promise<string> {
   const ai = createAI(apiKey);
   const model = modelName || getModel();
+  const { imageQuality = 'high', solutionDetail = 'standard' } = options;
 
   const prompt = `Bạn là chuyên gia giáo dục. Hãy đọc đề thi được đính kèm ở document này.
 Sau đó, hãy soạn thảo một đề thi MỚI HOÀN TOÀN nhưng có CẤU TRÚC, ĐỘ KHÓ, VÀ ĐỊNH DẠNG Y HỆT như đề mẫu.
+
 NỘI DUNG YÊU CẦU:
 1. Số lượng câu hỏi giống hệt.
 2. Các phần (trắc nghiệm, tự luận, đúng/sai, trả lời ngắn) giống hệt.
 3. Thay đổi nội dung câu hỏi, dữ liệu, nhưng giữ nguyên mức độ nhận thức (biết, hiểu, vận dụng, vận dụng cao).
-4. Cung cấp ĐÁP ÁN ở cuối đề.
+
+YÊU CẦU HÌNH VẼ:
+${IMAGE_QUALITY_PROMPTS[imageQuality]}
+
+YÊU CẦU ĐÁP ÁN / LỜI GIẢI:
+${SOLUTION_DETAIL_PROMPTS[solutionDetail]}
+
 YÊU CẦU ĐẦU RA:
-- Trả về ĐỊNH DẠNG HTML (sử dụng h2, h3, p, table nếu cần thiết). Chỉ trả về mã HTML sạch, không cần markdown block html.`;
+- Trả về ĐỊNH DẠNG HTML (sử dụng h2, h3, p, table nếu cần thiết). Chỉ trả về mã HTML sạch, không cần markdown block html.
+- Sử dụng CSS inline style cho bảng và định dạng. Font: Times New Roman, 13pt.`;
 
   try {
     const response = await generateContentWithModelFallback(ai, model, {
