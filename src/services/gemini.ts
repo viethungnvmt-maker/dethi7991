@@ -321,6 +321,88 @@ th { font-weight: bold; }`;
   }
 }
 
+export async function generateSimilarExam(
+  fileBase64: string,
+  mimeType: string,
+  apiKey: string,
+  modelName?: string
+): Promise<string> {
+  const ai = createAI(apiKey);
+  const model = modelName || getModel();
+
+  const prompt = `Bạn là chuyên gia giáo dục. Hãy đọc đề thi được đính kèm ở document này.
+Sau đó, hãy soạn thảo một đề thi MỚI HOÀN TOÀN nhưng có CẤU TRÚC, ĐỘ KHÓ, VÀ ĐỊNH DẠNG Y HỆT như đề mẫu.
+NỘI DUNG YÊU CẦU:
+1. Số lượng câu hỏi giống hệt.
+2. Các phần (trắc nghiệm, tự luận, đúng/sai, trả lời ngắn) giống hệt.
+3. Thay đổi nội dung câu hỏi, dữ liệu, nhưng giữ nguyên mức độ nhận thức (biết, hiểu, vận dụng, vận dụng cao).
+4. Cung cấp ĐÁP ÁN ở cuối đề.
+YÊU CẦU ĐẦU RA:
+- Trả về ĐỊNH DẠNG HTML (sử dụng h2, h3, p, table nếu cần thiết). Chỉ trả về mã HTML sạch, không cần markdown block html.`;
+
+  try {
+    const response = await generateContentWithModelFallback(ai, model, {
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: fileBase64 } },
+          { text: prompt }
+        ]
+      },
+      config: { temperature: 0.7 }
+    });
+    return (response.text || '').replace(/```html/g, '').replace(/```/g, '');
+  } catch (error: any) {
+    console.error('Similar Exam generation error:', error);
+    throw new Error(toUserFacingGeminiErrorMessage(error));
+  }
+}
+
+export async function generateExamVariants(
+  fileBase64: string,
+  mimeType: string,
+  apiKey: string,
+  modelName?: string
+): Promise<any> {
+  const ai = createAI(apiKey);
+  const model = modelName || getModel();
+
+  const prompt = `Bạn là chuyên gia giáo dục. Hãy đọc đề thi gốc được đính kèm.
+Tạo ra 3 ĐỀ THI BIẾN THỂ (Variant 1, Variant 2, Variant 3) từ đề gốc này.
+YÊU CẦU ĐỀ BIẾN THỂ:
+1. Tạo 3 mã đề HOÀN TOÀN ĐỘC LẬP (nội dung mới) dựa trên cấu trúc đề gốc (độ khó, format câu hỏi y hệt).
+2. Có kèm đáp án riêng cho từng mã đề ở cuối cùng.
+YÊU CẦU ĐẦU RA:
+- Trả về dạng JSON với cấu trúc:
+{
+  "variants": [
+    { "title": "Đề 1", "content": "Mã HTML của đề 1 (không bao gồm thẻ html...)" },
+    { "title": "Đề 2", "content": "Mã HTML của đề 2" },
+    { "title": "Đề 3", "content": "Mã HTML của đề 3" }
+  ]
+}`;
+
+  try {
+    const response = await generateContentWithModelFallback(ai, model, {
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: fileBase64 } },
+          { text: prompt }
+        ]
+      },
+      config: { responseMimeType: 'application/json', temperature: 0.8 }
+    });
+    const text = response.text || '{}';
+    try {
+      return JSON.parse(text.replace(/```json/g, '').replace(/```/g, ''));
+    } catch {
+      return JSON.parse(text);
+    }
+  } catch (error: any) {
+    console.error('Variants Exam generation error:', error);
+    throw new Error(toUserFacingGeminiErrorMessage(error));
+  }
+}
+
 export const PROMPTS = {
   PARSE_PPCT: () => '', // Now handled by parsePPCTFile function
   GENERATE_MATRIX: (subject: string, ppct: string, examType: string, duration: number, structure: string) => '',
