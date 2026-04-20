@@ -5003,6 +5003,26 @@ LẦN THỬ ${attempt}:
                 </p>
               </div>
 
+              {/* Hướng dẫn lấy API Key */}
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5">
+                <div className="w-9 h-9 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center shrink-0">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-red-400 ml-0.5">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <a
+                    href="https://youtu.be/KWkV1AwbjfY"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-primary hover:text-emerald-300 transition-colors"
+                  >
+                    📺 Hướng dẫn lấy API Key (Video)
+                  </a>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Xem video hướng dẫn chi tiết từng bước trên YouTube</p>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Model</label>
                 <select
